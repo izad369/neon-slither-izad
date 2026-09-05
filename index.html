@@ -194,76 +194,50 @@
 </head>
 <body>
 
-<!-- BEGIN AADS AD UNIT 2454309 -->
-<div id="aadsSticky2454309" style="
+<!-- BEGIN AADS AD UNIT 2454309 — thin full-width bar, main-menu only -->
+<div id="menuAdBar" style="
   position:fixed;
   left:0;
   right:0;
   bottom:0;
   width:100%;
-  height:50px;
+  height:46px;
   z-index:99999;
-  display:flex;
-  justify-content:center;
+  background:rgba(6,8,20,0.92);
+  border-top:1px solid rgba(255,255,255,0.08);
+  display:none;
   align-items:center;
-  pointer-events:none;
+  justify-content:center;
 ">
   <input autocomplete="off" type="checkbox" id="aadsClose2454309" hidden>
   <label for="aadsClose2454309" style="
     position:absolute;
-    right:8px;
-    top:4px;
-    width:20px;
-    height:20px;
+    right:6px;
+    top:6px;
+    width:18px;
+    height:18px;
     border-radius:4px;
     background:rgba(248,248,249,.85);
     z-index:100001;
     cursor:pointer;
-    pointer-events:auto;
     display:flex;
     align-items:center;
     justify-content:center;
   ">
-    <span style="font:16px/20px Arial,sans-serif;color:#000;">×</span>
+    <span style="font:14px/18px Arial,sans-serif;color:#000;">×</span>
   </label>
 
-  <div style="
-    width:320px;
-    max-width:calc(100vw - 16px);
-    height:50px;
-    position:relative;
-    z-index:100000;
-    overflow:hidden;
-    pointer-events:auto;
-  ">
+  <div style="width:100%; height:100%; position:relative; z-index:100000; overflow:hidden;">
     <iframe
       data-aa="2454309"
       src="//acceptable.a-ads.com/2454309/?size=Adaptive"
       title="Advertisement"
-      style="
-        border:0;
-        padding:0;
-        display:block;
-        width:320px;
-        max-width:100%;
-        height:50px;
-        overflow:hidden;
-        margin:0 auto;
-      "
+      style="border:0; padding:0; display:block; width:100%; height:100%; overflow:hidden;"
     ></iframe>
   </div>
 
   <style>
-    #aadsClose2454309:checked + label + div { display:none; }
     #aadsClose2454309:checked ~ div { display:none; }
-    @media (max-width:360px) {
-      #aadsSticky2454309 > div {
-        width:calc(100vw - 16px) !important;
-      }
-      #aadsSticky2454309 iframe {
-        width:100% !important;
-      }
-    }
   </style>
 </div>
 <!-- END AADS AD UNIT 2454309 -->
@@ -494,15 +468,20 @@
     document.getElementById('hud').classList.remove('active');
     document.getElementById('joystickZone').classList.remove('show');
     document.getElementById('boostBtn').classList.remove('show');
+    // the ad bar only ever shows on the main menu — never during gameplay
+    // or any other screen
+    document.getElementById('menuAdBar').style.display = (id === 'menuScreen') ? 'flex' : 'none';
   }
 
   document.getElementById('shopBtn').addEventListener('click', ()=>{ renderShop(); showScreen('shopScreen'); });
   document.getElementById('shopBackBtn').addEventListener('click', ()=> showScreen('menuScreen'));
   document.getElementById('howItWorksTrigger').addEventListener('click', ()=>{
     document.getElementById('howItWorksModal').classList.add('active');
+    document.getElementById('menuAdBar').style.display = 'none';
   });
   document.getElementById('closeHowItWorks').addEventListener('click', ()=>{
     document.getElementById('howItWorksModal').classList.remove('active');
+    document.getElementById('menuAdBar').style.display = 'flex';
   });
 
   // ---------------- Auth screen ----------------
@@ -676,6 +655,7 @@
     document.getElementById('joystickZone').classList.add('show');
     document.getElementById('boostBtn').classList.add('show');
     document.getElementById('modeTag').textContent = modeTagText;
+    document.getElementById('menuAdBar').style.display = 'none';
   }
   function exitGameUi(){
     document.getElementById('hud').classList.remove('active');
