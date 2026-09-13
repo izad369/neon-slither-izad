@@ -39,6 +39,7 @@
   }
   .btn.primary{ background:linear-gradient(135deg, var(--violet), var(--accent)); color:#0a0e1a; border:none; }
   .btn.gold{ background:linear-gradient(135deg, var(--gold), #ff9d42); color:#3a1f00; border:none; }
+  .btn.bot{ background:linear-gradient(135deg, #4fd6ff, #3a7bff); color:#04121f; border:none; }
   .btn.small{ width:auto; padding:2.6vw 6vw; font-size:3.8vw; margin:0; }
   .btn:active{ transform:scale(0.97); }
   .btn:disabled{ opacity:0.4; }
@@ -96,6 +97,42 @@
   .skinCard .name{ font-size:3.2vw; font-weight:800; }
   .skinCard .req{ font-size:2.8vw; color:var(--dim); }
   .bestScoreLine{ font-size:4vw; color:var(--dim); margin-bottom:3vh; }
+
+  /* ---------- Friends & Chat ---------- */
+  .sectionLabel{ font-size:3vw; color:var(--dim); font-weight:800; letter-spacing:0.1em; text-transform:uppercase; margin-bottom:1vh; text-align:left; }
+  .personRow{
+    display:flex; align-items:center; justify-content:space-between; gap:2vw;
+    background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08);
+    border-radius:12px; padding:2.6vw 3.5vw; margin-bottom:1.4vw;
+  }
+  .personRow .who{ display:flex; align-items:center; gap:2vw; }
+  .personRow .presenceDot{ width:2.2vw; height:2.2vw; border-radius:50%; background:#555; flex-shrink:0; }
+  .personRow .presenceDot.online{ background:#7cff8f; box-shadow:0 0 8px #7cff8f; }
+  .personRow .uname{ font-size:3.6vw; font-weight:700; }
+  .personRow button{
+    font-size:3vw; font-weight:800; padding:1.4vw 3.5vw; border-radius:100px; border:none; cursor:pointer;
+  }
+  .personRow .addBtn{ background:linear-gradient(135deg, var(--violet), var(--accent)); color:#0a0e1a; }
+  .personRow .chatBtn{ background:rgba(255,255,255,0.1); color:var(--ink); }
+  .personRow .friendTag{ font-size:2.8vw; color:var(--dim); }
+  .emptyNote{ font-size:3.2vw; color:var(--dim); padding:2vh 0; }
+
+  #chatMessages{
+    width:100%; max-width:360px; flex:1; overflow-y:auto;
+    display:flex; flex-direction:column; gap:1.2vh; padding:1vh 0;
+  }
+  .chatBubble{ max-width:75%; padding:2vw 3.5vw; border-radius:16px; font-size:3.4vw; text-align:left; line-height:1.4; }
+  .chatBubble.mine{ align-self:flex-end; background:linear-gradient(135deg, var(--violet), var(--accent)); color:#0a0e1a; }
+  .chatBubble.theirs{ align-self:flex-start; background:rgba(255,255,255,0.08); color:var(--ink); }
+
+  #voiceBtn{
+    position:absolute; top:2.5vh; left:4vw; z-index:6;
+    width:9vw; height:9vw; max-width:40px; max-height:40px; border-radius:50%;
+    background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.15);
+    display:none; align-items:center; justify-content:center; font-size:4vw; cursor:pointer;
+  }
+  #voiceBtn.show{ display:flex; }
+  #voiceBtn.active{ background:rgba(124,255,143,0.25); border-color:#7cff8f; }
   .bestScoreLine b{ color:var(--gold); }
 
   /* ---------- Lobby ---------- */
@@ -194,6 +231,28 @@
 </head>
 <body>
 
+<!-- BEGIN AADS AD UNIT 2454309 — thin full-width bar, main-menu only -->
+<div id="menuAdBar" style="
+  position:fixed;
+  left:0;
+  right:0;
+  bottom:0;
+  width:100%;
+  height:46px;
+  z-index:99999;
+  background:rgba(6,8,20,0.92);
+  border-top:1px solid rgba(255,255,255,0.08);
+  display:none;
+  align-items:center;
+  justify-content:center;
+">
+  <div id="frame" style="width: 100%;margin: auto;position: relative; z-index: 99998;">
+    <iframe data-aa='2454309' src='//acceptable.a-ads.com/2454309/?size=Adaptive'
+      style='border:0; padding:0; width:70%; height:auto; overflow:hidden;display: block;margin: auto'></iframe>
+  </div>
+</div>
+<!-- END AADS AD UNIT 2454309 -->
+
 <canvas id="gameCanvas"></canvas>
 
 <!-- ===================== MAIN MENU ===================== -->
@@ -205,8 +264,9 @@
   <h1 class="logo">NEON<br>SLITHER</h1>
   <p class="tag">Grow. Dodge. Don't touch anything.</p>
   <button class="btn primary" id="playOnlineBtn">Play Online</button>
-  <button class="btn" id="playOfflineBtn">Play Offline (vs Bots)</button>
-  <button class="btn" id="shopBtn">Shop</button>
+  <button class="btn bot" id="playOfflineBtn">🤖 Play with Bots</button>
+  <button class="btn gold" id="shopBtn">🛒 Shop</button>
+  <button class="btn" id="friendsBtn">👥 Friends &amp; Chat</button>
   <div class="infoTrigger" id="howItWorksTrigger">
     <div class="ic">?</div>
     <span class="txt">How does online multiplayer work? Tap to see.</span>
@@ -250,6 +310,33 @@
   <button class="btn small" id="shopBackBtn">Back</button>
 </div>
 
+<!-- ===================== FRIENDS & CHAT ===================== -->
+<div class="screen" id="friendsScreen">
+  <h2 class="screenTitle">👥 Friends &amp; Chat</h2>
+  <p class="sub" id="friendsLoginNote" style="display:none;">Log in to add friends and chat.</p>
+  <div id="friendsBody" style="width:100%; max-width:360px;">
+    <div style="display:flex; gap:2vw; width:100%; margin-bottom:2vh;">
+      <input class="field" type="text" id="playerSearchInput" placeholder="Search players…" style="margin-bottom:0; flex:1;">
+      <button class="btn small" id="playerSearchBtn" style="margin-bottom:0;">Search</button>
+    </div>
+    <div id="searchResults"></div>
+    <div class="sectionLabel" style="margin-top:2vh;">Your Friends</div>
+    <div id="friendsListBox"></div>
+  </div>
+  <button class="btn small" id="friendsBackBtn">Back</button>
+</div>
+
+<!-- ===================== CHAT ===================== -->
+<div class="screen" id="chatScreen" style="padding-bottom:2vh;">
+  <h2 class="screenTitle" id="chatWithName">Chat</h2>
+  <div id="chatMessages"></div>
+  <div style="display:flex; gap:2vw; width:100%; max-width:360px; margin-top:1.5vh;">
+    <input class="field" type="text" id="chatInput" placeholder="Message…" style="margin-bottom:0; flex:1;">
+    <button class="btn small" id="chatSendBtn" style="margin-bottom:0;">Send</button>
+  </div>
+  <button class="btn small" id="chatBackBtn" style="margin-top:1.5vh;">Back</button>
+</div>
+
 <!-- ===================== LOBBY ===================== -->
 <div class="screen" id="lobbyScreen">
   <h2 class="screenTitle">Finding Players</h2>
@@ -272,7 +359,7 @@
 <div id="howItWorksModal">
   <div class="modalCard">
     <h2>How Online Play Works</h2>
-    <svg class="diagram" viewBox="0 0 400 160" xmlns="">
+    <svg class="diagram" viewBox="0 0 400 160" xmlns="http://www.w3.org/2000/svg">
       <rect x="0" y="0" width="400" height="160" fill="none"/>
       <rect x="170" y="15" width="60" height="50" rx="8" fill="#8b5cf6"/>
       <text x="200" y="45" font-size="11" fill="#0a0e1a" text-anchor="middle" font-weight="bold">SERVER</text>
@@ -289,6 +376,7 @@
       <line x1="255" y1="122" x2="220" y2="65" stroke="rgba(255,255,255,0.3)" stroke-width="2" stroke-dasharray="4,4"/>
       <line x1="345" y1="105" x2="220" y2="60" stroke="rgba(255,255,255,0.3)" stroke-width="2" stroke-dasharray="4,4"/>
     </svg>
+    <p>Every player's phone only sends the direction it wants to move. One central server keeps the real, official copy of the whole arena — every snake's position, every piece of food, every collision.</p>
     <p>The server constantly sends back "here's what the arena actually looks like right now" to everyone, so all players see the same shared world at the same time — no matter how many people are playing.</p>
     <p>That's also why an internet connection is needed for online play: your phone is talking to that server the whole time. Offline mode skips the server entirely and plays against bots on your own device instead.</p>
     <button class="btn primary" id="closeHowItWorks" style="margin-top:1vh;">Got it</button>
@@ -304,83 +392,21 @@
     <div id="lbRows"></div>
   </div>
 </div>
+<div id="voiceBtn" title="Voice chat">🎤</div>
 <div id="joystickZone"><div id="joyBase"><div id="joyKnob"></div></div></div>
 <div id="boostBtn">⚡</div>
 
 <div id="watermark">Creator: izad<br>© 2026 Neon Slither. All rights reserved.</div>
-
-<!-- BEGIN AADS AD UNIT 2454309 -->
-
-<div style="position: absolute; z-index: 99999">
-      <input autocomplete="off" type="checkbox" id="aadsstickymtoaq6ts" hidden />
-      <div style="padding-top: 0; padding-bottom: auto;">
-        <div style="width:100%;height:auto;position:fixed;text-align:center;font-size:0;bottom:0;left:0;right:0;margin:auto">
-          <label for="aadsstickymtoaq6ts" style="top: 50%;transform: translateY(-50%);right:24px;; position: absolute;border-radius: 4px; background: rgba(248, 248, 249, 0.70); padding: 4px;z-index: 99999;cursor:pointer">
-            <svg fill="#000000" height="16px" width="16px" xmlns="" viewBox="0 0 490 490">
-              <polygon points="456.851,0 245,212.564 33.149,0 0.708,32.337 212.669,245.004 0.708,457.678 33.149,490 245,277.443 456.851,490 489.292,457.678 277.331,245.004 489.292,32.337 "/>
-            </svg>
-          </label>
-          <div id="frame" style="width: 100%;margin: auto;position: relative; z-index: 99998;"><iframe data-aa=2454309 src=//acceptable.a-ads.com/2454309/?size=Adaptive style='border:0; padding:0; width:70%; height:auto; overflow:hidden; margin: auto'></iframe></div>
-        </div>
-        <style>
-      #aadsstickymtoaq6ts:checked + div {
-        display: none;
-      }
-    </style>
-    </div></div>
-
-<!-- END AADS AD UNIT 2454309 -->
-
-<!-- ===================== AD BAR (only shown on menu) ===================== -->
-<div id="menuAdBar" style="
-  position:fixed;
-  left:0;
-  right:0;
-  bottom:0;
-  width:100%;
-  height:46px;
-  z-index:99999;
-  background:rgba(6,8,20,0.92);
-  border-top:1px solid rgba(255,255,255,0.08);
-  display:none;
-  align-items:center;
-  justify-content:center;
-">
-  <input autocomplete="off" type="checkbox" id="aadsClose2454309" hidden>
-  <label for="aadsClose2454309" style="
-    position:absolute;
-    right:6px;
-    top:6px;
-    width:18px;
-    height:18px;
-    border-radius:4px;
-    background:rgba(248,248,249,.85);
-    z-index:100001;
-    cursor:pointer;
-    display:flex;
-    align-items:center;
-    justify-content:center;
-  ">
-    <span style="font:14px/18px Arial,sans-serif;color:#000;">×</span>
-  </label>
-  <div style="width:100%; height:100%; position:relative; z-index:100000; overflow:hidden;">
-    <iframe
-      data-aa="2454309"
-      src="//acceptable.a-ads.com/2454309/?size=Adaptive"
-      title="Advertisement"
-      style="border:0; padding:0; display:block; width:100%; height:100%; overflow:hidden;"
-    ></iframe>
-  </div>
-  <style>
-    #aadsClose2454309:checked ~ div { display:none; }
-  </style>
-</div>
 
 <script>
 (function(){
   // ================================================================
   //  STORAGE / SESSION
   // ================================================================
+  // wraps every localStorage call so that browsers which block storage
+  // (common in some in-app browsers like Telegram/Instagram's built-in
+  // viewer) can't crash the whole script — the game just falls back to
+  // an in-memory, non-persistent store for that session instead
   const memoryFallback = {};
   function safeGet(key, def){
     try { const v = localStorage.getItem(key); return v===null ? def : v; }
@@ -421,6 +447,7 @@
       const data = await api('/api/profile', { token: store.token });
       session = { loggedIn:true, username:data.username, bestScore:data.bestScore, skin:data.skin };
       store.skin = data.skin;
+      connectSocial();
     } catch { store.token = null; store.username = null; }
     updateUserChip();
   }
@@ -482,6 +509,8 @@
     document.getElementById('hud').classList.remove('active');
     document.getElementById('joystickZone').classList.remove('show');
     document.getElementById('boostBtn').classList.remove('show');
+    // the ad bar only ever shows on the main menu — never during gameplay
+    // or any other screen
     document.getElementById('menuAdBar').style.display = (id === 'menuScreen') ? 'flex' : 'none';
   }
 
@@ -495,6 +524,130 @@
     document.getElementById('howItWorksModal').classList.remove('active');
     document.getElementById('menuAdBar').style.display = 'flex';
   });
+
+  // ================================================================
+  //  FRIENDS & CHAT
+  // ================================================================
+  let socialSocket = null;
+  let currentChatFriend = null;
+  const unreadFrom = new Set();
+
+  function connectSocial(){
+    if(!session.loggedIn) return;
+    if(socialSocket && (socialSocket.readyState === 0 || socialSocket.readyState === 1)) return;
+    socialSocket = new WebSocket(wsUrl());
+    socialSocket.onopen = ()=>{ socialSocket.send(JSON.stringify({ type:'social-hello', token: store.token })); };
+    socialSocket.onmessage = (ev)=>{
+      const msg = JSON.parse(ev.data);
+      if(msg.type === 'chat-incoming'){
+        if(currentChatFriend && currentChatFriend.toLowerCase() === msg.from){
+          appendChatBubble(msg.entry.text, false);
+        } else {
+          unreadFrom.add(msg.from);
+          refreshFriendsUnreadBadge();
+        }
+      }
+    };
+    socialSocket.onclose = ()=>{ if(session.loggedIn) setTimeout(connectSocial, 3000); };
+  }
+
+  function refreshFriendsUnreadBadge(){
+    const btn = document.getElementById('friendsBtn');
+    btn.textContent = unreadFrom.size > 0 ? `👥 Friends & Chat (${unreadFrom.size})` : '👥 Friends & Chat';
+  }
+
+  document.getElementById('friendsBtn').addEventListener('click', ()=>{
+    document.getElementById('friendsLoginNote').style.display = session.loggedIn ? 'none' : 'block';
+    document.getElementById('friendsBody').style.display = session.loggedIn ? 'block' : 'none';
+    if(session.loggedIn){ loadFriendsList(); }
+    showScreen('friendsScreen');
+  });
+  document.getElementById('friendsBackBtn').addEventListener('click', ()=> showScreen('menuScreen'));
+
+  document.getElementById('playerSearchBtn').addEventListener('click', doPlayerSearch);
+  document.getElementById('playerSearchInput').addEventListener('keydown', (e)=>{ if(e.key==='Enter') doPlayerSearch(); });
+
+  async function doPlayerSearch(){
+    const q = document.getElementById('playerSearchInput').value.trim();
+    const box = document.getElementById('searchResults');
+    if(q.length < 2){ box.innerHTML = '<div class="emptyNote">Type at least 2 characters…</div>'; return; }
+    try {
+      const data = await api('/api/search-users', { token: store.token, query: q });
+      if(data.results.length === 0){ box.innerHTML = '<div class="emptyNote">No players found.</div>'; return; }
+      box.innerHTML = '';
+      data.results.forEach(r=>{
+        const row = document.createElement('div');
+        row.className = 'personRow';
+        row.innerHTML = `<div class="who"><span class="presenceDot ${r.online?'online':''}"></span><span class="uname">${r.username}</span></div>`;
+        if(r.isFriend){
+          const tag = document.createElement('span'); tag.className = 'friendTag'; tag.textContent = 'Friend'; row.appendChild(tag);
+        } else {
+          const btn = document.createElement('button'); btn.className = 'addBtn'; btn.textContent = 'Add Friend';
+          btn.addEventListener('click', async ()=>{
+            try { await api('/api/friends/add', { token: store.token, target: r.username }); doPlayerSearch(); loadFriendsList(); }
+            catch(e){ alert(e.message); }
+          });
+          row.appendChild(btn);
+        }
+        box.appendChild(row);
+      });
+    } catch(e){ box.innerHTML = `<div class="emptyNote">${e.message}</div>`; }
+  }
+
+  async function loadFriendsList(){
+    const box = document.getElementById('friendsListBox');
+    box.innerHTML = '<div class="emptyNote">Loading…</div>';
+    try {
+      const data = await api('/api/friends/list', { token: store.token });
+      if(data.friends.length === 0){ box.innerHTML = '<div class="emptyNote">No friends yet — search for players above.</div>'; return; }
+      box.innerHTML = '';
+      data.friends.forEach(f=>{
+        const row = document.createElement('div');
+        row.className = 'personRow';
+        const badge = unreadFrom.has(f.username.toLowerCase()) ? ' 🔴' : '';
+        row.innerHTML = `<div class="who"><span class="presenceDot ${f.online?'online':''}"></span><span class="uname">${f.username}${badge}</span></div>`;
+        const btn = document.createElement('button'); btn.className = 'chatBtn'; btn.textContent = 'Chat';
+        btn.addEventListener('click', ()=> openChat(f.username));
+        row.appendChild(btn);
+        box.appendChild(row);
+      });
+    } catch(e){ box.innerHTML = `<div class="emptyNote">${e.message}</div>`; }
+  }
+
+  async function openChat(username){
+    currentChatFriend = username;
+    unreadFrom.delete(username.toLowerCase());
+    refreshFriendsUnreadBadge();
+    document.getElementById('chatWithName').textContent = 'Chat — ' + username;
+    document.getElementById('chatMessages').innerHTML = '';
+    showScreen('chatScreen');
+    try {
+      const data = await api('/api/chat/history', { token: store.token, withUser: username });
+      data.messages.forEach(m => appendChatBubble(m.text, m.from.toLowerCase() === (session.username||'').toLowerCase()));
+    } catch(e){ /* ignore — empty history is fine */ }
+  }
+
+  function appendChatBubble(text, mine){
+    const box = document.getElementById('chatMessages');
+    const b = document.createElement('div');
+    b.className = 'chatBubble ' + (mine ? 'mine' : 'theirs');
+    b.textContent = text;
+    box.appendChild(b);
+    box.scrollTop = box.scrollHeight;
+  }
+
+  document.getElementById('chatBackBtn').addEventListener('click', ()=>{ currentChatFriend = null; showScreen('friendsScreen'); loadFriendsList(); });
+  document.getElementById('chatSendBtn').addEventListener('click', sendChatMessage);
+  document.getElementById('chatInput').addEventListener('keydown', (e)=>{ if(e.key==='Enter') sendChatMessage(); });
+  function sendChatMessage(){
+    const input = document.getElementById('chatInput');
+    const text = input.value.trim();
+    if(!text || !currentChatFriend || !socialSocket || socialSocket.readyState !== 1) return;
+    socialSocket.send(JSON.stringify({ type:'chat-send', token: store.token, to: currentChatFriend, text }));
+    appendChatBubble(text, true);
+    input.value = '';
+  }
+
 
   // ---------------- Auth screen ----------------
   let authMode = 'register';
@@ -531,6 +684,7 @@
       store.token = data.token; store.username = data.username;
       session = { loggedIn:true, username:data.username, bestScore:data.bestScore, skin:data.skin };
       store.skin = data.skin;
+      connectSocial();
       updateUserChip();
       showScreen('menuScreen');
     } catch(e){
@@ -542,6 +696,7 @@
   document.getElementById('logoutBtn').addEventListener('click', ()=>{
     store.token = null; store.username = null;
     session = { loggedIn:false, username:null, bestScore:0, skin: store.skin };
+    if(socialSocket){ socialSocket.close(); socialSocket = null; }
     updateUserChip();
     showScreen('menuScreen');
   });
@@ -555,9 +710,9 @@
   window.addEventListener('resize', resizeCanvas);
   resizeCanvas();
 
-  let latestState = null;
+  let latestState = null;   // {players:[...], food:[...], leaderboard:[...], worldSize}
   let myId = null;
-  let mode = null;
+  let mode = null;          // 'online' | 'offline'
 
   function hexToRgba(hex,a){
     const v = hex.replace('#','');
@@ -668,11 +823,14 @@
     document.getElementById('boostBtn').classList.add('show');
     document.getElementById('modeTag').textContent = modeTagText;
     document.getElementById('menuAdBar').style.display = 'none';
+    if(modeTagText === 'Online') document.getElementById('voiceBtn').classList.add('show');
   }
   function exitGameUi(){
     document.getElementById('hud').classList.remove('active');
     document.getElementById('joystickZone').classList.remove('show');
     document.getElementById('boostBtn').classList.remove('show');
+    document.getElementById('voiceBtn').classList.remove('show');
+    stopVoiceChat();
   }
 
   // ================================================================
@@ -699,7 +857,12 @@
       } else if(msg.type === 'state'){
         latestState = msg;
       } else if(msg.type === 'dead'){
+        stopVoiceChat();
         onDeath(msg.score, true);
+      } else if(msg.type === 'voice-offer' || msg.type === 'voice-answer' || msg.type === 'voice-ice'){
+        handleVoiceSignal(msg);
+      } else if(msg.type === 'voice-peer-left'){
+        closeVoicePeer(msg.fromId);
       }
     };
   }
@@ -725,6 +888,121 @@
     enterGameUi('Online');
   }
 
+  // ================================================================
+  //  VOICE CHAT (WebRTC mesh between players in the same live arena)
+  // ================================================================
+  // Note: this uses a public STUN server only (no TURN), so it connects
+  // directly between phones when possible — it may not get through very
+  // restrictive networks (some corporate/public wifi), which is a normal
+  // limitation of STUN-only setups without a relay server.
+  let voiceActive = false;
+  let localVoiceStream = null;
+  const voicePeers = new Map(); // playerId -> RTCPeerConnection
+  const voiceAudioEls = new Map(); // playerId -> <audio>
+
+  const ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }];
+
+  document.getElementById('voiceBtn').addEventListener('click', ()=>{
+    if(voiceActive) stopVoiceChat(); else startVoiceChat();
+  });
+
+  async function startVoiceChat(){
+    if(mode !== 'online' || !myId) return;
+    try {
+      localVoiceStream = await navigator.mediaDevices.getUserMedia({ audio:true });
+    } catch(e){
+      alert("Couldn't access your microphone. Check your browser's permissions.");
+      return;
+    }
+    voiceActive = true;
+    document.getElementById('voiceBtn').classList.add('active');
+    document.getElementById('voiceBtn').textContent = '🎙️';
+
+    // connect to everyone currently in the arena; to avoid both sides
+    // offering each other at once, only the "lower" id initiates
+    if(latestState){
+      for(const p of latestState.players){
+        if(p.id === myId) continue;
+        if(myId < p.id) createVoicePeer(p.id, true);
+      }
+    }
+  }
+
+  function stopVoiceChat(){
+    if(!voiceActive) return;
+    voiceActive = false;
+    document.getElementById('voiceBtn').classList.remove('active');
+    document.getElementById('voiceBtn').textContent = '🎤';
+    if(localVoiceStream){ localVoiceStream.getTracks().forEach(t=>t.stop()); localVoiceStream = null; }
+    if(socket && socket.readyState === 1){ try{ socket.send(JSON.stringify({type:'voice-leave'})); }catch{} }
+    for(const id of [...voicePeers.keys()]) closeVoicePeer(id);
+  }
+
+  function createVoicePeer(targetId, isInitiator){
+    if(voicePeers.has(targetId)) return voicePeers.get(targetId);
+    const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+    voicePeers.set(targetId, pc);
+
+    if(localVoiceStream){
+      localVoiceStream.getTracks().forEach(track => pc.addTrack(track, localVoiceStream));
+    }
+    pc.onicecandidate = (e)=>{
+      if(e.candidate && socket && socket.readyState === 1){
+        socket.send(JSON.stringify({ type:'voice-ice', targetId, candidate: e.candidate }));
+      }
+    };
+    pc.ontrack = (e)=>{
+      let audioEl = voiceAudioEls.get(targetId);
+      if(!audioEl){
+        audioEl = document.createElement('audio');
+        audioEl.autoplay = true;
+        audioEl.style.display = 'none';
+        document.body.appendChild(audioEl);
+        voiceAudioEls.set(targetId, audioEl);
+      }
+      audioEl.srcObject = e.streams[0];
+    };
+
+    if(isInitiator){
+      pc.onnegotiationneeded = async ()=>{
+        try {
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+          if(socket && socket.readyState === 1){
+            socket.send(JSON.stringify({ type:'voice-offer', targetId, sdp: pc.localDescription }));
+          }
+        } catch(e){}
+      };
+    }
+    return pc;
+  }
+
+  async function handleVoiceSignal(msg){
+    if(!voiceActive && msg.type === 'voice-offer'){
+      // someone is calling us but we haven't opted in to voice chat yet — ignore
+      return;
+    }
+    const pc = createVoicePeer(msg.fromId, false);
+    if(msg.type === 'voice-offer'){
+      await pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      socket.send(JSON.stringify({ type:'voice-answer', targetId: msg.fromId, sdp: pc.localDescription }));
+    } else if(msg.type === 'voice-answer'){
+      await pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
+    } else if(msg.type === 'voice-ice'){
+      try { await pc.addIceCandidate(msg.candidate); } catch(e){}
+    }
+  }
+
+  function closeVoicePeer(id){
+    const pc = voicePeers.get(id);
+    if(pc){ pc.close(); voicePeers.delete(id); }
+    const audioEl = voiceAudioEls.get(id);
+    if(audioEl){ audioEl.remove(); voiceAudioEls.delete(id); }
+  }
+
+  // input loop: online sends to server, offline applies directly
   setInterval(()=>{
     if(mode === 'online' && socket && socket.readyState === 1){
       if(joyMag > 0.15) socket.send(JSON.stringify({ type:'input', angle: joyAngle, boost: boosting }));
@@ -751,7 +1029,7 @@
       id, name, color, isBot, alive:true,
       path:[{x:offRand(-400,400), y:offRand(-400,400)}],
       angle, targetAngle:angle, length: OFF.START_LENGTH, boosting:false,
-      botTimer:0
+      botTimer:0, aggressive:false, aggroTimer:0
     };
   }
   function offSegmentsFor(p){
@@ -796,6 +1074,17 @@
   document.getElementById('playOfflineBtn').addEventListener('click', startOfflineGame);
 
   function offPickBotAngle(bot){
+    const player = offWorld.snakes.find(s=>s.id==='local' && s.alive);
+    const playerHead = player ? player.path[0] : null;
+    const distToPlayer = playerHead ? offDist(bot.path[0].x,bot.path[0].y,playerHead.x,playerHead.y) : Infinity;
+
+    bot.aggroTimer -= 1;
+    if(bot.aggroTimer <= 0){
+      bot.aggroTimer = 12;
+      bot.aggressive = player && bot.length > OFF.START_LENGTH*1.3 && distToPlayer < 700 && Math.random() < 0.55;
+    }
+    bot.boosting = bot.aggressive && distToPlayer < 400 && bot.length > OFF.START_LENGTH*0.9;
+
     let best = bot.angle, bestScore = -Infinity;
     for(let i=0;i<10;i++){
       const ang = (Math.PI*2/10)*i + Math.random()*0.3;
@@ -808,16 +1097,24 @@
         const segs = offSegmentsFor(other);
         for(let s=0;s<segs.length;s+=2){
           if(other.id===bot.id && s<3) continue;
+          const fearWeight = (bot.aggressive && other.id==='local') ? 2 : 8;
           const d = offDist(tx,ty,segs[s].x,segs[s].y);
-          if(d < 40) score -= (40-d)*8;
+          if(d < 40) score -= (40-d)*fearWeight;
         }
       }
-      let nearestFood = Infinity;
-      for(const f of offWorld.food){
-        const d = offDist(tx,ty,f.x,f.y);
-        if(d < nearestFood) nearestFood = d;
+      if(bot.aggressive && playerHead){
+        const leadDist = 130;
+        const predictX = playerHead.x + Math.cos(player.angle)*leadDist;
+        const predictY = playerHead.y + Math.sin(player.angle)*leadDist;
+        score -= offDist(tx,ty,predictX,predictY)*0.22;
+      } else {
+        let nearestFood = Infinity;
+        for(const f of offWorld.food){
+          const d = offDist(tx,ty,f.x,f.y);
+          if(d < nearestFood) nearestFood = d;
+        }
+        score -= nearestFood*0.08;
       }
-      score -= nearestFood*0.08;
       score += Math.random()*4;
       if(score > bestScore){ bestScore = score; best = ang; }
     }
@@ -825,6 +1122,7 @@
   }
 
   function offRespawnBot(p){
+    // only respawn if we're still in the same offline session this bot belongs to
     if(mode !== 'offline' || !offWorld || !offWorld.snakes.includes(p)) return;
     const angle = offRand(0, Math.PI*2);
     p.path = [{ x: offRand(-OFF.WORLD_SIZE/2+300, OFF.WORLD_SIZE/2-300), y: offRand(-OFF.WORLD_SIZE/2+300, OFF.WORLD_SIZE/2-300) }];
@@ -842,6 +1140,7 @@
     if(p.id === 'local'){
       onDeath(Math.floor(p.length), false);
     } else {
+      // bots come back after a short pause, so the arena never empties out
       setTimeout(()=> offRespawnBot(p), 1500 + Math.random()*1500);
     }
   }
@@ -867,7 +1166,7 @@
       } else {
         p.botTimer -= dt;
         if(p.botTimer <= 0){ p.targetAngle = offPickBotAngle(p); p.botTimer = 0.45 + Math.random()*0.5; }
-        p.boosting = false;
+        // boosting is decided inside offPickBotAngle() as part of hunting behavior
       }
       let diff = ((p.targetAngle - p.angle + Math.PI*3) % (Math.PI*2)) - Math.PI;
       const maxTurn = OFF.TURN_RATE*dt;
@@ -955,6 +1254,9 @@
   // ================================================================
   //  BOOT
   // ================================================================
+  // Returning players who already have an account skip straight to the
+  // menu; everyone else lands on the sign-in gate first, with a clearly
+  // visible "Continue as Guest" option if they don't want to register.
   syncAuthTabs();
   (async ()=>{
     await restoreSession();
@@ -967,6 +1269,5 @@
   })();
 })();
 </script>
-
 </body>
 </html>
