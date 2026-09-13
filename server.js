@@ -24,7 +24,11 @@ const USERS_FILE = path.join(__dirname, 'users.json');
 //  ACCOUNTS
 // ================================================================
 function loadUsers(){
-  try { return JSON.parse(fs.readFileSync(USERS_FILE, 'utf8')); }
+  try {
+    const data = JSON.parse(fs.readFileSync(USERS_FILE, 'utf8'));
+    for(const key of Object.keys(data)){ if(!Array.isArray(data[key].friends)) data[key].friends = []; }
+    return data;
+  }
   catch { return {}; }
 }
 function saveUsers(users){
@@ -39,6 +43,22 @@ function makeToken(){
 
 let users = loadUsers();
 const tokens = new Map(); // token -> username (in-memory; cleared on restart)
+
+// ---------------- chat / friends support ----------------
+const MESSAGES_FILE = path.join(__dirname, 'messages.json');
+function loadMessages(){
+  try { return JSON.parse(fs.readFileSync(MESSAGES_FILE, 'utf8')); }
+  catch { return {}; }
+}
+function saveMessages(m){
+  fs.writeFileSync(MESSAGES_FILE, JSON.stringify(m, null, 2));
+}
+let messages = loadMessages();
+function conversationKey(a, b){ return [a,b].sort().join('|'); }
+
+// username(lowercased) -> socket, used for chat presence/delivery. This is
+// a lightweight "social" connection, separate from being in a live arena.
+const onlineUsers = new Map();
 
 function readJsonBody(req){
   return new Promise((resolve, reject)=>{
@@ -60,7 +80,7 @@ async function handleApi(req, res, pathname){
     const key = username.toLowerCase();
     if(users[key]){ res.writeHead(409); res.end(JSON.stringify({ error:'That username is taken.' })); return; }
     const salt = crypto.randomBytes(16).toString('hex');
-    users[key] = { username, salt, hash: hashPassword(password, salt), bestScore: 0, skin: 'classic' };
+    users[key] = { username, salt, hash: hashPassword(password, salt), bestScore: 0, skin: 'classic', friends: [] };
     saveUsers(users);
     const token = makeToken();
     tokens.set(token, key);
@@ -97,6 +117,63 @@ async function handleApi(req, res, pathname){
     if(!u){ res.writeHead(401); res.end(JSON.stringify({ error:'Not logged in.' })); return; }
     u.skin = skin; saveUsers(users);
     res.writeHead(200); res.end(JSON.stringify({ ok:true }));
+    return;
+  }
+
+  if(pathname === '/api/search-users' && req.method === 'POST'){
+    const { token, query } = await readJsonBody(req);
+    const key = tokens.get(token);
+    const me = key && users[key];
+    if(!me){ res.writeHead(401); res.end(JSON.stringify({ error:'Not logged in.' })); return; }
+    const q = (query||'').toLowerCase().trim();
+    if(q.length < 2){ res.writeHead(200); res.end(JSON.stringify({ results:[] })); return; }
+    const results = Object.keys(users)
+      .filter(k => k !== key && k.includes(q))
+      .slice(0, 15)
+      .map(k => ({ username: users[k].username, online: onlineUsers.has(k), isFriend: me.friends.includes(k) }));
+    res.writeHead(200); res.end(JSON.stringify({ results }));
+    return;
+  }
+
+  if(pathname === '/api/friends/list' && req.method === 'POST'){
+    const { token } = await readJsonBody(req);
+    const key = tokens.get(token);
+    const me = key && users[key];
+    if(!me){ res.writeHead(401); res.end(JSON.stringify({ error:'Not logged in.' })); return; }
+    const list = me.friends.map(fk => {
+      const f = users[fk];
+      return f ? { username: f.username, online: onlineUsers.has(fk) } : null;
+    }).filter(Boolean);
+    res.writeHead(200); res.end(JSON.stringify({ friends: list }));
+    return;
+  }
+
+  if(pathname === '/api/friends/add' && req.method === 'POST'){
+    const { token, target } = await readJsonBody(req);
+    const key = tokens.get(token);
+    const me = key && users[key];
+    if(!me){ res.writeHead(401); res.end(JSON.stringify({ error:'Not logged in.' })); return; }
+    const targetKey = (target||'').toLowerCase().trim();
+    const targetUser = users[targetKey];
+    if(!targetUser){ res.writeHead(404); res.end(JSON.stringify({ error:'No player with that username.' })); return; }
+    if(targetKey === key){ res.writeHead(400); res.end(JSON.stringify({ error:"You can't add yourself." })); return; }
+    if(!me.friends.includes(targetKey)) me.friends.push(targetKey);
+    if(!targetUser.friends.includes(key)) targetUser.friends.push(key);
+    saveUsers(users);
+    res.writeHead(200); res.end(JSON.stringify({ ok:true, username: targetUser.username }));
+    return;
+  }
+
+  if(pathname === '/api/chat/history' && req.method === 'POST'){
+    const { token, withUser } = await readJsonBody(req);
+    const key = tokens.get(token);
+    const me = key && users[key];
+    if(!me){ res.writeHead(401); res.end(JSON.stringify({ error:'Not logged in.' })); return; }
+    const otherKey = (withUser||'').toLowerCase().trim();
+    if(!me.friends.includes(otherKey)){ res.writeHead(403); res.end(JSON.stringify({ error:'Not friends with that player.' })); return; }
+    const convo = conversationKey(key, otherKey);
+    const history = messages[convo] || [];
+    res.writeHead(200); res.end(JSON.stringify({ messages: history.slice(-50) }));
     return;
   }
 
@@ -244,16 +321,41 @@ function broadcastState(){
   const alive = [...players.values()].filter(p=>p.alive);
   const leaderboard = alive.slice().sort((a,b)=>b.length-a.length).slice(0,5)
     .map(p=>({ name:p.name, score:Math.floor(p.length) }));
-  const publicPlayers = alive.map(p=>({
+
+  // pre-compute each player's full segment list once — the previous version
+  // re-sent this AND the entire (up to 260-item) food array to EVERY socket
+  // on every tick uncropped, which is what was causing the lag online
+  const publicPlayersFull = alive.map(p=>({
     id:p.id, name:p.name, color:p.color,
     segs: segmentsFor(p).map(s=>({x:Math.round(s.x), y:Math.round(s.y)})),
-    length: Math.floor(p.length)
+    length: Math.floor(p.length),
+    _headX: p.path[0].x, _headY: p.path[0].y
   }));
-  const payload = JSON.stringify({ type:'state', players:publicPlayers,
-    food: food.map(f=>({x:Math.round(f.x), y:Math.round(f.y), r:f.r, c:f.color})),
-    leaderboard, worldSize: WORLD_SIZE });
-  for(const p of players.values()){
-    if(p.socket && p.socket.readyState === 1) p.socket.send(payload);
+
+  // nothing further than this could plausibly be visible to a given player,
+  // so there's no reason to spend bytes sending it to them specifically
+  const VIEW_RADIUS = 1500;
+
+  for(const me of players.values()){
+    if(!(me.socket && me.socket.readyState === 1)) continue;
+    const head = me.path[0];
+
+    const nearFood = [];
+    for(const f of food){
+      if(Math.abs(f.x-head.x) < VIEW_RADIUS && Math.abs(f.y-head.y) < VIEW_RADIUS){
+        nearFood.push({ x:Math.round(f.x), y:Math.round(f.y), r:f.r, c:f.color });
+      }
+    }
+
+    const players_ = publicPlayersFull.map(p=>{
+      if(p.id === me.id) return { id:p.id, name:p.name, color:p.color, segs:p.segs, length:p.length };
+      const near = Math.abs(p._headX-head.x) < VIEW_RADIUS*1.4 && Math.abs(p._headY-head.y) < VIEW_RADIUS*1.4;
+      return { id:p.id, name:p.name, color:p.color, length:p.length,
+        segs: near ? p.segs : (p.segs[0] ? [p.segs[0]] : []) };
+    });
+
+    const payload = JSON.stringify({ type:'state', players:players_, food:nearFood, leaderboard, worldSize: WORLD_SIZE });
+    me.socket.send(payload);
   }
 }
 
@@ -312,7 +414,8 @@ const server = http.createServer((req,res)=>{
 
 const wss = new WebSocketServer({ server, path:'/ws' });
 wss.on('connection', (socket)=>{
-  let id = null;
+  let id = null;          // this connection's live-arena player id (if any)
+  let socialKey = null;   // this connection's logged-in username key (if any)
 
   socket.on('message', (raw)=>{
     let msg;
@@ -353,13 +456,59 @@ wss.on('connection', (socket)=>{
     } else if(msg.type === 'respawn' && id && players.has(id)){
       const old = players.get(id);
       players.set(id, makePlayer(id, old.name, old.color, socket, old.token));
+
+    // ---------------- social presence (for chat) ----------------
+    } else if(msg.type === 'social-hello'){
+      const key = tokens.get(msg.token);
+      if(!key) return;
+      socialKey = key;
+      onlineUsers.set(key, socket);
+
+    // ---------------- text chat ----------------
+    } else if(msg.type === 'chat-send'){
+      const key = tokens.get(msg.token);
+      const me = key && users[key];
+      const otherKey = (msg.to||'').toLowerCase().trim();
+      if(!me || !me.friends.includes(otherKey)) return;
+      const convo = conversationKey(key, otherKey);
+      const entry = { from: me.username, text: String(msg.text||'').slice(0,500), ts: Date.now() };
+      if(!messages[convo]) messages[convo] = [];
+      messages[convo].push(entry);
+      if(messages[convo].length > 200) messages[convo] = messages[convo].slice(-200);
+      saveMessages(messages);
+      socket.send(JSON.stringify({ type:'chat-sent', to:otherKey, entry }));
+      const otherSocket = onlineUsers.get(otherKey);
+      if(otherSocket && otherSocket.readyState === 1){
+        otherSocket.send(JSON.stringify({ type:'chat-incoming', from:key, entry }));
+      }
+
+    // ---------------- voice chat signaling relay (arena players only) ----------------
+    } else if((msg.type === 'voice-offer' || msg.type === 'voice-answer' || msg.type === 'voice-ice') && id){
+      const target = players.get(msg.targetId);
+      if(target && target.socket && target.socket.readyState === 1){
+        target.socket.send(JSON.stringify({ ...msg, fromId: id }));
+      }
+    } else if(msg.type === 'voice-leave' && id){
+      for(const [pid, p] of players){
+        if(pid !== id && p.socket && p.socket.readyState === 1){
+          p.socket.send(JSON.stringify({ type:'voice-peer-left', fromId: id }));
+        }
+      }
     }
   });
 
   socket.on('close', ()=>{
-    if(id) players.delete(id);
+    if(id){
+      players.delete(id);
+      for(const [pid, p] of players){
+        if(p.socket && p.socket.readyState === 1){
+          p.socket.send(JSON.stringify({ type:'voice-peer-left', fromId: id }));
+        }
+      }
+    }
     const info = waiting.get(socket);
     if(info){ clearTimeout(info.timer); waiting.delete(socket); broadcastLobbyCount(); }
+    if(socialKey && onlineUsers.get(socialKey) === socket) onlineUsers.delete(socialKey);
   });
 });
 
