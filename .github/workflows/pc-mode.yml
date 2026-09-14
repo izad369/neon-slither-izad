@@ -1,0 +1,156 @@
+name: Add PC mode
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Add PC mode script
+        run: |
+          cat > pc-mode.js <<'PCMODE'
+(() => {
+  'use strict';
+  const isLandscape = () => window.innerWidth > window.innerHeight;
+  let active = false;
+  let mouseSteer = false;
+  let center = {x: 0, y: 0};
+  const keys = new Set();
+  let overlay, hint;
+
+  function ensureUI() {
+    if (document.getElementById('pcModeOverlay')) return;
+    const style = document.createElement('style');
+    style.id = 'pcModeStyle';
+    style.textContent = `
+      #pcModeOverlay{position:fixed;inset:0;z-index:9999;pointer-events:none;font-family:Segoe UI,system-ui,sans-serif;display:none}
+      #pcModeOverlay.show{display:block}
+      #pcModeBadge{position:absolute;top:14px;left:50%;transform:translateX(-50%);padding:8px 16px;border-radius:999px;background:rgba(10,14,26,.78);border:1px solid rgba(79,214,255,.55);color:#4fd6ff;font-weight:900;font-size:14px;letter-spacing:.08em;box-shadow:0 0 20px rgba(79,214,255,.18)}
+      #pcModeHint{position:absolute;left:50%;bottom:24px;transform:translateX(-50%);max-width:min(760px,90vw);padding:14px 20px;border-radius:16px;background:rgba(6,8,20,.88);border:1px solid rgba(255,255,255,.14);color:#f0f4ff;text-align:center;font-size:15px;line-height:1.55;box-shadow:0 10px 40px rgba(0,0,0,.35);transition:opacity .4s}
+      #pcModeHint b{color:#4fd6ff}
+      #pcModeHint .key{display:inline-block;padding:2px 7px;margin:0 2px;border:1px solid rgba(255,255,255,.25);border-radius:6px;background:rgba(255,255,255,.08);font-weight:800}
+    `;
+    document.head.appendChild(style);
+    overlay = document.createElement('div');
+    overlay.id = 'pcModeOverlay';
+    overlay.innerHTML = '<div id="pcModeBadge">PC MODE</div><div id="pcModeHint"><b>PC Mode enabled</b><br>Move the mouse to steer • <span class="key">W</span><span class="key">A</span><span class="key">S</span><span class="key">D</span> or <span class="key">Arrow Keys</span> to steer • Hold <span class="key">Space</span> to boost</div>';
+    document.body.appendChild(overlay);
+    hint = overlay.querySelector('#pcModeHint');
+  }
+
+  function joystickCenter() {
+    const base = document.getElementById('joyBase');
+    if (!base) return {x:window.innerWidth*0.16,y:window.innerHeight*0.78};
+    const r = base.getBoundingClientRect();
+    return {x:r.left+r.width/2,y:r.top+r.height/2};
+  }
+
+  function steer(x, y) {
+    const zone = document.getElementById('joystickZone');
+    if (!zone) return;
+    center = joystickCenter();
+    if (!window.__pcJoyHeld) {
+      window.__pcJoyHeld = true;
+      zone.dispatchEvent(new MouseEvent('mousedown',{bubbles:true,clientX:center.x,clientY:center.y,button:0,buttons:1}));
+    }
+    window.dispatchEvent(new MouseEvent('mousemove',{bubbles:true,clientX:x,clientY:y,buttons:1}));
+  }
+
+  function stopSteer() {
+    if (window.__pcJoyHeld) {
+      window.__pcJoyHeld = false;
+      window.dispatchEvent(new MouseEvent('mouseup',{bubbles:true,clientX:center.x,clientY:center.y,button:0,buttons:0}));
+    }
+  }
+
+  function keyboardDirection() {
+    const left = keys.has('a') || keys.has('arrowleft');
+    const right = keys.has('d') || keys.has('arrowright');
+    const up = keys.has('w') || keys.has('arrowup');
+    const down = keys.has('s') || keys.has('arrowdown');
+    let dx=(right?1:0)-(left?1:0), dy=(down?1:0)-(up?1:0);
+    if (!dx && !dy) return false;
+    center = joystickCenter();
+    const radius = Math.max(55, Math.min(window.innerWidth,window.innerHeight)*0.12);
+    const len=Math.hypot(dx,dy)||1;
+    steer(center.x+dx/len*radius, center.y+dy/len*radius);
+    return true;
+  }
+
+  function setActive(on) {
+    ensureUI();
+    active = !!on;
+    overlay.classList.toggle('show',active);
+    if (active) {
+      document.body.classList.add('pc-mode-active');
+      setTimeout(()=>{ if(hint) hint.style.opacity='0'; },7000);
+    } else {
+      document.body.classList.remove('pc-mode-active');
+      if(hint) hint.style.opacity='1';
+      stopSteer();
+    }
+  }
+
+  function update() {
+    const landscape=isLandscape();
+    if (landscape !== active) setActive(landscape);
+  }
+
+  window.addEventListener('resize',update);
+  window.addEventListener('orientationchange',()=>setTimeout(update,120));
+
+  document.addEventListener('keydown',e=>{
+    if (!active || e.target.matches('input,textarea,select')) return;
+    const k=e.key.toLowerCase();
+    if (['w','a','s','d','arrowup','arrowdown','arrowleft','arrowright',' '].includes(k)) e.preventDefault();
+    keys.add(k);
+    if (k===' ') {
+      const boost=document.getElementById('boostBtn');
+      boost?.dispatchEvent(new MouseEvent('mousedown',{bubbles:true,clientX:0,clientY:0,button:0,buttons:1}));
+    }
+    keyboardDirection();
+  },{passive:false});
+
+  document.addEventListener('keyup',e=>{
+    if (!active) return;
+    const k=e.key.toLowerCase();
+    keys.delete(k);
+    if (k===' ') {
+      const boost=document.getElementById('boostBtn');
+      boost?.dispatchEvent(new MouseEvent('mouseup',{bubbles:true,clientX:0,clientY:0,button:0,buttons:0}));
+    }
+    if (!keyboardDirection()) stopSteer();
+  },{passive:false});
+
+  window.addEventListener('mousemove',e=>{
+    if (!active || keys.size) return;
+    if (!mouseSteer) {
+      center=joystickCenter();
+      const d=Math.hypot(e.clientX-center.x,e.clientY-center.y);
+      if (d>18) mouseSteer=true;
+    }
+    if (mouseSteer) steer(e.clientX,e.clientY);
+  });
+  window.addEventListener('blur',()=>{keys.clear();stopSteer();});
+
+  ensureUI();
+  update();
+})();
+PCMODE
+          python3 - <<'PY'
+from pathlib import Path
+p=Path('index.html')
+s=p.read_text()
+needle='</body>'
+if '/pc-mode.js' not in s:
+    s=s.replace(needle, '  <script src="/pc-mode.js"></script>\n'+needle, 1)
+p.write_text(s)
+PY
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add index.html pc-mode.js
+          git diff --cached --quiet || (git commit -m 'feat: add automatic PC mode for landscape games' && git push)
