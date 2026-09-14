@@ -8,7 +8,5 @@
     "start": "node server.js",
     "postinstall": "node -e \"const fs=require('fs');const p='index.html';let s=fs.readFileSync(p,'utf8');if(!s.includes('/pc-mode.js')){s=s.replace('</body>','<script src=\\\"/pc-mode.js\\\"></script>\\n</body>');fs.writeFileSync(p,s)}\""
   },
-  "dependencies": {
-    "ws": "^8.18.0"
-  }
+  "dependencies": {"ws":"^8.18.0"}
 }
