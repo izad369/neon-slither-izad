@@ -84,11 +84,15 @@ async function handleApi(req, res, pathname){
     u.skin = skin; saveUsers(users); res.writeHead(200); res.end(JSON.stringify({ ok:true })); return;
   }
   if(pathname === '/api/search-users' && req.method === 'POST'){
-    const { token, query } = await readJsonBody(req); const key = tokens.get(token); const me = key && users[key];
-    if(!me){ res.writeHead(401); res.end(JSON.stringify({ error:'Not logged in.' })); return; }
+    const { token, query } = await readJsonBody(req);
+    const key = tokens.get(token);
+    const me = key && users[key];
     const q = (query||'').toLowerCase().trim();
     if(q.length < 2){ res.writeHead(200); res.end(JSON.stringify({ results:[] })); return; }
-    const results = Object.keys(users).filter(k => k !== key && k.includes(q)).slice(0,15).map(k => ({ username:users[k].username, online:onlineUsers.has(k), isFriend:me.friends.includes(k) }));
+    const results = Object.keys(users)
+      .filter(k => k !== key && k.includes(q))
+      .slice(0,15)
+      .map(k => ({ username:users[k].username, online:onlineUsers.has(k), isFriend:!!(me && Array.isArray(me.friends) && me.friends.includes(k)) }));
     res.writeHead(200); res.end(JSON.stringify({ results })); return;
   }
   if(pathname === '/api/friends/list' && req.method === 'POST'){
@@ -129,7 +133,7 @@ function segmentsFor(p){const segs=[];let travelled=0,need=p.length;segs.push(p.
 function killPlayer(p){p.alive=false;const segs=segmentsFor(p);scatterFoodFromDeath(segs,Math.min(40,Math.floor(p.length/6)));if(p.token)recordScoreForToken(p.token,Math.floor(p.length));if(p.socket&&p.socket.readyState===1)p.socket.send(JSON.stringify({type:'dead',score:Math.floor(p.length)}));}
 function tick(dt){
   if(food.length<FOOD_TARGET)spawnFood(Math.min(6,FOOD_TARGET-food.length));
-  for(const p of players.values()){if(!p.alive)continue;let diff=((p.targetAngle-p.angle+Math.PI*3)%(Math.PI*2))-Math.PI;const maxTurn=TURN_RATE*dt;p.angle+=Math.max(-maxTurn,Math.min(maxTurn,diff));const speed=(p.boosting&&p.length>START_LENGTH*0.7)?BOOST_SPEED:BASE_SPEED;if(p.boosting&&p.length>START_LENGTH*0.7){p.length=Math.max(START_LENGTH*0.6,p.length-BOOST_DRAIN_PER_SEC*dt);if(Math.random()<0.25)scatterFoodFromDeath([p.path[0]],1);}const head=p.path[0],nx=head.x+Math.cos(p.angle)*speed*dt,ny=head.y+Math.sin(p.angle)*speed*dt;p.path.unshift({x:nx,y:ny});const maxPathLen=Math.ceil((p.length/SEG_SPACING)*1.4)+20;if(p.path.length>maxPathLen)p.path.length=maxPathLen;if(Math.abs(nx)>WORLD_SIZE/2||Math.abs(ny)>WORLD_SIZE/2){killPlayer(p);continue;}}
+  for(const p of players.values()){if(!p.alive)continue;let diff=((p.targetAngle-p.angle+Math.PI*3)%(Math.PI*2))-Math.PI;const maxTurn=TURN_RATE*dt;p.angle+=Math.max(-maxTurn,Math.min(maxTurn,diff));const speed=(p.boosting&&p.length>START_LENGTH*0.7)?BOOST_SPEED:BASE_SPEED;if(p.boosting&&p.length>START_LENGTH*0.7){p.length=Math.max(START_LENGTH*0.6,p.length-BOOST_DRAIN_PER_SEC*dt);if(Math.random()<0.25)scatterFoodFromDeath([p.path[0]],1);}const head=p.path[0],nx=head.x+Math.cos(p.angle)*speed*dt,ny=head.y+Math.sin(p.angle)*speed*dt;p.path.unshift({x:nx,y:ny});const maxPathLen=Math.ceil((p.length/SEG_SPACING)*1.4)+20;if(p.path.length>maxPathLen)p.path.length=maxPath;if(Math.abs(nx)>WORLD_SIZE/2||Math.abs(ny)>WORLD_SIZE/2){killPlayer(p);continue;}}
   for(const p of players.values()){if(!p.alive)continue;const head=p.path[0];for(let i=food.length-1;i>=0;i--){const f=food[i];if(dist(head.x,head.y,f.x,f.y)<HEAD_RADIUS+f.r){food.splice(i,1);p.length+=GROWTH_PER_FOOD;}}}
   const alivePlayers=[...players.values()].filter(p=>p.alive),segCache=new Map();for(const p of alivePlayers)segCache.set(p.id,segmentsFor(p));
   for(const p of alivePlayers){const head=p.path[0];for(const other of alivePlayers){if(other.id===p.id)continue;const segs=segCache.get(other.id);for(let i=1;i<segs.length;i++){if(dist(head.x,head.y,segs[i].x,segs[i].y)<HEAD_RADIUS*1.1){killPlayer(p);break;}}if(!p.alive)break;}}
