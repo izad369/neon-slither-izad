@@ -1,12 +1,13 @@
 {
   "name": "neon-slither",
-  "version": "1.0.0",
-  "description": "Neon Slither — online multiplayer arena game, mobile-first",
-  "main": "server.js",
-  "engines": { "node": ">=18" },
+  "version": "2.0.0",
+  "private": true,
   "scripts": {
-    "start": "node -r ./runtime-patch.js server.js",
-    "postinstall": "node -e \"const fs=require('fs');const p='index.html';let s=fs.readFileSync(p,'utf8');if(!s.includes('/pc-mode.js')){s=s.replace('</body>','<script src=\\\"/pc-mode.js\\\"></script>\\n</body>');fs.writeFileSync(p,s)}\""
+    "deploy": "wrangler deploy --config wrangler.jsonc",
+    "dev": "wrangler dev --config wrangler.jsonc",
+    "start": "wrangler dev --config wrangler.jsonc"
   },
-  "dependencies": { "ws": "^8.18.0" }
+  "devDependencies": {
+    "wrangler": "4.141.0"
+  }
 }
