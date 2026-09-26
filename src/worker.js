@@ -92,7 +92,6 @@ async function handleApi(request, env, pathname) {
     return json({ ok: true });
   }
 
-  // Search players by username substring
   if (pathname === '/api/search-users' && request.method === 'POST') {
     const { token, query } = await readJson(request);
     const key = token ? await env.USERS.get('token:' + token) : null;
@@ -103,12 +102,10 @@ async function handleApi(request, env, pathname) {
     }
     const q = (query || '').toLowerCase().trim();
     if (q.length < 2) return json({ results: [] });
-
-    // List user keys from KV (prefix user:)
     const listed = await env.USERS.list({ prefix: 'user:', limit: 1000 });
     const results = [];
     for (const item of listed.keys) {
-      const k = item.name.slice(5); // remove "user:"
+      const k = item.name.slice(5);
       if (k === key) continue;
       if (!k.includes(q)) continue;
       const raw = await env.USERS.get(item.name);
@@ -150,19 +147,43 @@ async function handleApi(request, env, pathname) {
     if (!meRaw) return json({ error: 'Not logged in.' }, 401);
     const me = JSON.parse(meRaw);
     if (!Array.isArray(me.friends)) me.friends = [];
-
     const targetKey = (target || '').toLowerCase().trim();
     if (targetKey === key) return json({ error: "You can't add yourself." }, 400);
     const targetRaw = await env.USERS.get('user:' + targetKey);
     if (!targetRaw) return json({ error: 'No player with that username.' }, 404);
     const targetUser = JSON.parse(targetRaw);
     if (!Array.isArray(targetUser.friends)) targetUser.friends = [];
-
     if (!me.friends.includes(targetKey)) me.friends.push(targetKey);
     if (!targetUser.friends.includes(key)) targetUser.friends.push(key);
     await env.USERS.put('user:' + key, JSON.stringify(me));
     await env.USERS.put('user:' + targetKey, JSON.stringify(targetUser));
     return json({ ok: true, username: targetUser.username });
+  }
+
+  if (pathname === '/api/chat/send' && request.method === 'POST') {
+    const { token, to, text } = await readJson(request);
+    const key = await env.USERS.get('token:' + token);
+    if (!key) return json({ error: 'Not logged in.' }, 401);
+    const meRaw = await env.USERS.get('user:' + key);
+    if (!meRaw) return json({ error: 'Not logged in.' }, 401);
+    const me = JSON.parse(meRaw);
+    const otherKey = (to || '').toLowerCase().trim();
+    if (!Array.isArray(me.friends) || !me.friends.includes(otherKey))
+      return json({ error: 'Not friends with that player.' }, 403);
+    const body = String(text || '').slice(0, 500).trim();
+    if (!body) return json({ error: 'Empty message.' }, 400);
+    const ck = conversationKey(key, otherKey);
+    const histKey = 'chat:' + ck;
+    let hist = [];
+    try {
+      const prev = await env.USERS.get(histKey);
+      if (prev) hist = JSON.parse(prev);
+    } catch {}
+    const entry = { from: me.username, text: body, ts: Date.now() };
+    hist.push(entry);
+    if (hist.length > 200) hist = hist.slice(-200);
+    await env.USERS.put(histKey, JSON.stringify(hist));
+    return json({ ok: true, entry });
   }
 
   if (pathname === '/api/chat/history' && request.method === 'POST') {
