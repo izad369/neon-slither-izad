@@ -34,52 +34,36 @@ function conversationKey(a, b) {
   return [a, b].sort().join('|');
 }
 
-const CHAT_OVERRIDE = `
-<script>
-(function(){
-  function waitReady(fn){
-    if (typeof api === 'function' && typeof appendChatBubble === 'function') return fn();
-    setTimeout(function(){ waitReady(fn); }, 50);
-  }
-  waitReady(function(){
-    window.sendChatMessage = async function(){
-      var input = document.getElementById('chatInput');
-      if (!input) return;
-      var text = (input.value || '').trim();
-      if (!text || !currentChatFriend || !store || !store.token) return;
-      input.value = '';
-      appendChatBubble(text, true);
-      try {
-        await api('/api/chat/send', { token: store.token, to: currentChatFriend, text: text });
-      } catch (e) {
-        console.warn('chat send failed', e);
-      }
-      try {
-        if (socialSocket && socialSocket.readyState === 1) {
-          socialSocket.send(JSON.stringify({ type: 'chat-send', token: store.token, to: currentChatFriend, text: text }));
-        }
-      } catch (e) {}
-    };
-    var btn = document.getElementById('chatSendBtn');
-    if (btn) {
-      btn.onclick = function(e){ e.preventDefault(); window.sendChatMessage(); };
-    }
-    var inp = document.getElementById('chatInput');
-    if (inp) {
-      inp.addEventListener('keydown', function(e){
-        if (e.key === 'Enter') { e.preventDefault(); window.sendChatMessage(); }
-      });
-    }
-  });
-})();
-</script>
-`;
-
 function patchChatClient(html) {
-  if (html.includes('</body>')) {
-    html = html.replace('</body>', CHAT_OVERRIDE + '</body>');
+  // Replace the original sendChatMessage (inside the IIFE) with HTTP-persisting version
+  const oldFn =
+    "function sendChatMessage(){\n    const input = document.getElementById('chatInput');\n    const text = input.value.trim();\n    if(!text || !currentChatFriend || !socialSocket || socialSocket.readyState !== 1) return;\n    socialSocket.send(JSON.stringify({ type:'chat-send', token: store.token, to: currentChatFriend, text }));\n    appendChatBubble(text, true);\n    input.value = '';\n  }";
+
+  const newFn =
+    "async function sendChatMessage(){\n    const input = document.getElementById('chatInput');\n    const text = input.value.trim();\n    if(!text || !currentChatFriend || !store.token) return;\n    input.value = '';\n    appendChatBubble(text, true);\n    try {\n      await api('/api/chat/send', { token: store.token, to: currentChatFriend, text: text });\n    } catch(e) { console.warn('chat send failed', e); }\n    try {\n      if(socialSocket && socialSocket.readyState === 1){\n        socialSocket.send(JSON.stringify({ type:'chat-send', token: store.token, to: currentChatFriend, text: text }));\n      }\n    } catch(e) {}\n  }";
+
+  if (html.includes(oldFn)) {
+    html = html.replace(oldFn, newFn);
   } else {
-    html += CHAT_OVERRIDE;
+    // Fallback: inject before the closing of the main IIFE
+    const marker = '})();\n</script>';
+    const inject =
+      ";\n" +
+      "window.__nsSendChat = async function(){\n" +
+      "  var input = document.getElementById('chatInput');\n" +
+      "  if(!input) return;\n" +
+      "  var text = (input.value||'').trim();\n" +
+      "  if(!text || !currentChatFriend || !store || !store.token) return;\n" +
+      "  input.value = '';\n" +
+      "  appendChatBubble(text, true);\n" +
+      "  try { await api('/api/chat/send', { token: store.token, to: currentChatFriend, text: text }); } catch(e) {}\n" +
+      "};\n" +
+      "var __btn = document.getElementById('chatSendBtn');\n" +
+      "if(__btn){ __btn.onclick = function(e){ e && e.preventDefault(); window.__nsSendChat(); }; }\n" +
+      "var __inp = document.getElementById('chatInput');\n" +
+      "if(__inp){ __inp.addEventListener('keydown', function(e){ if(e.key==='Enter'){ e.preventDefault(); window.__nsSendChat(); } }); }\n" +
+      marker;
+    if (html.includes(marker)) html = html.replace(marker, inject);
   }
   return html;
 }
