@@ -3,6 +3,8 @@ import { Arena } from './arena.js';
 export { Arena };
 
 const encoder = new TextEncoder();
+const GOOD_INDEX_URL =
+  'https://raw.githubusercontent.com/izad369/neon-slither-izad/17716e5bf55a6f5f02d4ffc8f4dca5835673777f/index.html';
 
 async function hashPassword(password, salt) {
   const keyMaterial = await crypto.subtle.importKey('raw', encoder.encode(password), 'PBKDF2', false, ['deriveBits']);
@@ -30,6 +32,30 @@ async function readJson(request) {
 }
 function conversationKey(a, b) {
   return [a, b].sort().join('|');
+}
+
+function patchChatClient(html) {
+  // Make chat persist via HTTP so the other account can load history
+  const oldSend =
+    "  function sendChatMessage(){\n    const input = document.getElementById('chatInput');\n    const text = input.value.trim();\n    if(!text || !currentChatFriend || !socialSocket || socialSocket.readyState !== 1) return;\n    socialSocket.send(JSON.stringify({ type:'chat-send', token: store.token, to: currentChatFriend, text }));\n    appendChatBubble(text, true);\n    input.value = '';\n  }";
+  const newSend =
+    "  async function sendChatMessage(){\n    const input = document.getElementById('chatInput');\n    const text = input.value.trim();\n    if(!text || !currentChatFriend || !store.token) return;\n    input.value = '';\n    appendChatBubble(text, true);\n    try { await api('/api/chat/send', { token: store.token, to: currentChatFriend, text }); } catch(e){}\n    if(socialSocket && socialSocket.readyState === 1){\n      try { socialSocket.send(JSON.stringify({ type:'chat-send', token: store.token, to: currentChatFriend, text })); } catch {}\n    }\n  }";
+  if (html.includes(oldSend)) html = html.replace(oldSend, newSend);
+  return html;
+}
+
+async function serveGameHtml() {
+  const res = await fetch(GOOD_INDEX_URL);
+  if (!res.ok) return new Response('Failed to load game HTML', { status: 502 });
+  let html = await res.text();
+  html = patchChatClient(html);
+  return new Response(html, {
+    status: 200,
+    headers: {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': 'no-cache',
+    },
+  });
 }
 
 async function handleApi(request, env, pathname) {
@@ -213,6 +239,10 @@ export default {
       return env.ARENA.get(id).fetch(request);
     }
     if (url.pathname.startsWith('/api/')) return handleApi(request, env, url.pathname);
+    // Always serve patched game HTML for the main page (ignore broken asset)
+    if (url.pathname === '/' || url.pathname === '/index.html') {
+      return serveGameHtml();
+    }
     if (env.ASSETS) return env.ASSETS.fetch(request);
     return new Response('Neon Slither Worker is running.', { status: 200 });
   },
