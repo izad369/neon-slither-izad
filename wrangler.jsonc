@@ -18,7 +18,7 @@
   "migrations": [
     {
       "tag": "v1",
-      "new_classes": ["Arena"]
+      "new_sqlite_classes": ["Arena"]
     }
   ],
   "kv_namespaces": [
