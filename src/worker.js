@@ -28,6 +28,9 @@ function json(data, status = 200) {
 async function readJson(request) {
   try { return await request.json(); } catch { return {}; }
 }
+function conversationKey(a, b) {
+  return [a, b].sort().join('|');
+}
 
 async function handleApi(request, env, pathname) {
   if (request.method === 'OPTIONS') {
@@ -49,11 +52,12 @@ async function handleApi(request, env, pathname) {
     if (await env.USERS.get('user:' + key)) return json({ error: 'That username is taken.' }, 409);
     const salt = makeSalt();
     const hash = await hashPassword(password, salt);
-    await env.USERS.put('user:' + key, JSON.stringify({ username, salt, hash, bestScore: 0, skin: 'classic' }));
+    await env.USERS.put('user:' + key, JSON.stringify({ username, salt, hash, bestScore: 0, skin: 'classic', friends: [] }));
     const token = makeToken();
     await env.USERS.put('token:' + token, key, { expirationTtl: 60 * 60 * 24 * 30 });
     return json({ token, username, bestScore: 0, skin: 'classic' });
   }
+
   if (pathname === '/api/login' && request.method === 'POST') {
     const { username, password } = await readJson(request);
     const key = (username || '').toLowerCase();
@@ -65,6 +69,7 @@ async function handleApi(request, env, pathname) {
     await env.USERS.put('token:' + token, key, { expirationTtl: 60 * 60 * 24 * 30 });
     return json({ token, username: u.username, bestScore: u.bestScore || 0, skin: u.skin || 'classic' });
   }
+
   if (pathname === '/api/profile' && request.method === 'POST') {
     const { token } = await readJson(request);
     const key = await env.USERS.get('token:' + token);
@@ -74,6 +79,7 @@ async function handleApi(request, env, pathname) {
     const u = JSON.parse(raw);
     return json({ username: u.username, bestScore: u.bestScore || 0, skin: u.skin || 'classic' });
   }
+
   if (pathname === '/api/set-skin' && request.method === 'POST') {
     const { token, skin } = await readJson(request);
     const key = await env.USERS.get('token:' + token);
@@ -85,6 +91,96 @@ async function handleApi(request, env, pathname) {
     await env.USERS.put('user:' + key, JSON.stringify(u));
     return json({ ok: true });
   }
+
+  // Search players by username substring
+  if (pathname === '/api/search-users' && request.method === 'POST') {
+    const { token, query } = await readJson(request);
+    const key = token ? await env.USERS.get('token:' + token) : null;
+    let me = null;
+    if (key) {
+      const meRaw = await env.USERS.get('user:' + key);
+      if (meRaw) me = JSON.parse(meRaw);
+    }
+    const q = (query || '').toLowerCase().trim();
+    if (q.length < 2) return json({ results: [] });
+
+    // List user keys from KV (prefix user:)
+    const listed = await env.USERS.list({ prefix: 'user:', limit: 1000 });
+    const results = [];
+    for (const item of listed.keys) {
+      const k = item.name.slice(5); // remove "user:"
+      if (k === key) continue;
+      if (!k.includes(q)) continue;
+      const raw = await env.USERS.get(item.name);
+      if (!raw) continue;
+      const u = JSON.parse(raw);
+      results.push({
+        username: u.username,
+        online: false,
+        isFriend: !!(me && Array.isArray(me.friends) && me.friends.includes(k)),
+      });
+      if (results.length >= 15) break;
+    }
+    return json({ results });
+  }
+
+  if (pathname === '/api/friends/list' && request.method === 'POST') {
+    const { token } = await readJson(request);
+    const key = await env.USERS.get('token:' + token);
+    if (!key) return json({ error: 'Not logged in.' }, 401);
+    const raw = await env.USERS.get('user:' + key);
+    if (!raw) return json({ error: 'Not logged in.' }, 401);
+    const me = JSON.parse(raw);
+    const friends = Array.isArray(me.friends) ? me.friends : [];
+    const list = [];
+    for (const fk of friends) {
+      const fr = await env.USERS.get('user:' + fk);
+      if (!fr) continue;
+      const f = JSON.parse(fr);
+      list.push({ username: f.username, online: false });
+    }
+    return json({ friends: list });
+  }
+
+  if (pathname === '/api/friends/add' && request.method === 'POST') {
+    const { token, target } = await readJson(request);
+    const key = await env.USERS.get('token:' + token);
+    if (!key) return json({ error: 'Not logged in.' }, 401);
+    const meRaw = await env.USERS.get('user:' + key);
+    if (!meRaw) return json({ error: 'Not logged in.' }, 401);
+    const me = JSON.parse(meRaw);
+    if (!Array.isArray(me.friends)) me.friends = [];
+
+    const targetKey = (target || '').toLowerCase().trim();
+    if (targetKey === key) return json({ error: "You can't add yourself." }, 400);
+    const targetRaw = await env.USERS.get('user:' + targetKey);
+    if (!targetRaw) return json({ error: 'No player with that username.' }, 404);
+    const targetUser = JSON.parse(targetRaw);
+    if (!Array.isArray(targetUser.friends)) targetUser.friends = [];
+
+    if (!me.friends.includes(targetKey)) me.friends.push(targetKey);
+    if (!targetUser.friends.includes(key)) targetUser.friends.push(key);
+    await env.USERS.put('user:' + key, JSON.stringify(me));
+    await env.USERS.put('user:' + targetKey, JSON.stringify(targetUser));
+    return json({ ok: true, username: targetUser.username });
+  }
+
+  if (pathname === '/api/chat/history' && request.method === 'POST') {
+    const { token, withUser } = await readJson(request);
+    const key = await env.USERS.get('token:' + token);
+    if (!key) return json({ error: 'Not logged in.' }, 401);
+    const meRaw = await env.USERS.get('user:' + key);
+    if (!meRaw) return json({ error: 'Not logged in.' }, 401);
+    const me = JSON.parse(meRaw);
+    const otherKey = (withUser || '').toLowerCase().trim();
+    if (!Array.isArray(me.friends) || !me.friends.includes(otherKey))
+      return json({ error: 'Not friends with that player.' }, 403);
+    const ck = conversationKey(key, otherKey);
+    const histRaw = await env.USERS.get('chat:' + ck);
+    const msgs = histRaw ? JSON.parse(histRaw) : [];
+    return json({ messages: msgs.slice(-50) });
+  }
+
   return json({ error: 'Not found' }, 404);
 }
 
