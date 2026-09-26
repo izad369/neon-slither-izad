@@ -1,4 +1,4 @@
-// Neon Slither — Durable Object game arena (Cloudflare)
+// Neon Slither — Durable Object game arena + social chat
 const WORLD_SIZE = 4000;
 const FOOD_TARGET = 260;
 const BASE_SPEED = 160;
@@ -16,6 +16,7 @@ const DEFAULT_COLORS = ['#4fd6ff', '#ff5da2', '#7cff8f', '#ffd23f', '#b48bff', '
 
 function rand(a, b) { return a + Math.random() * (b - a); }
 function dist(x1, y1, x2, y2) { return Math.hypot(x1 - x2, y1 - y2); }
+function conversationKey(a, b) { return [a, b].sort().join('|'); }
 
 export class Arena {
   constructor(state, env) {
@@ -24,6 +25,7 @@ export class Arena {
     this.sessions = new Map();
     this.players = new Map();
     this.waiting = new Map();
+    this.onlineUsers = new Map(); // userKey -> ws
     this.food = [];
     this.nextFoodId = 1;
     this.nextPlayerId = 1;
@@ -57,9 +59,65 @@ export class Arena {
   handleSession(ws) {
     ws.accept();
     let playerId = null;
-    ws.addEventListener('message', (evt) => {
+    let socialKey = null;
+
+    ws.addEventListener('message', async (evt) => {
       let msg;
-      try { msg = JSON.parse(typeof evt.data === 'string' ? evt.data : new TextDecoder().decode(evt.data)); } catch { return; }
+      try {
+        msg = JSON.parse(typeof evt.data === 'string' ? evt.data : new TextDecoder().decode(evt.data));
+      } catch {
+        return;
+      }
+
+      if (msg.type === 'social-hello') {
+        if (!msg.token || !this.env.USERS) return;
+        try {
+          const key = await this.env.USERS.get('token:' + msg.token);
+          if (!key) return;
+          socialKey = key;
+          this.onlineUsers.set(key, ws);
+        } catch {}
+        return;
+      }
+
+      if (msg.type === 'chat-send') {
+        if (!msg.token || !this.env.USERS) return;
+        try {
+          const key = await this.env.USERS.get('token:' + msg.token);
+          if (!key) return;
+          const meRaw = await this.env.USERS.get('user:' + key);
+          if (!meRaw) return;
+          const me = JSON.parse(meRaw);
+          const otherKey = (msg.to || '').toLowerCase().trim();
+          if (!Array.isArray(me.friends) || !me.friends.includes(otherKey)) return;
+
+          const text = String(msg.text || '').slice(0, 500).trim();
+          if (!text) return;
+
+          const ck = conversationKey(key, otherKey);
+          const entry = { from: me.username, text, ts: Date.now() };
+          const histKey = 'chat:' + ck;
+          let hist = [];
+          try {
+            const prev = await this.env.USERS.get(histKey);
+            if (prev) hist = JSON.parse(prev);
+          } catch {}
+          hist.push(entry);
+          if (hist.length > 200) hist = hist.slice(-200);
+          await this.env.USERS.put(histKey, JSON.stringify(hist));
+
+          this.safeSend(ws, { type: 'chat-sent', to: otherKey, entry });
+
+          const otherSocket = this.onlineUsers.get(otherKey);
+          if (otherSocket && otherSocket !== ws) {
+            this.safeSend(otherSocket, { type: 'chat-incoming', from: key, entry });
+          }
+        } catch (e) {
+          console.error('chat-send error', e);
+        }
+        return;
+      }
+
       if (msg.type === 'lobby-join') {
         if (this.waiting.has(ws)) return;
         const timerId = setTimeout(() => {
@@ -91,32 +149,43 @@ export class Arena {
         const p = this.players.get(playerId);
         if (typeof msg.angle === 'number') p.targetAngle = msg.angle;
         p.boosting = !!msg.boost;
-      } else if (msg.type === 'chat' && playerId && this.players.has(playerId)) {
-        const p = this.players.get(playerId);
-        const text = String(msg.text || '').slice(0, 80).trim();
-        if (text) this.broadcastAll({ type: 'chat', name: p.name, text, color: p.color });
       }
     });
+
     ws.addEventListener('close', () => {
       if (playerId) this.players.delete(playerId);
       this.sessions.delete(ws);
       const info = this.waiting.get(ws);
-      if (info) { clearTimeout(info.timerId); this.waiting.delete(ws); this.broadcastLobbyCount(); }
+      if (info) {
+        clearTimeout(info.timerId);
+        this.waiting.delete(ws);
+        this.broadcastLobbyCount();
+      }
+      if (socialKey && this.onlineUsers.get(socialKey) === ws) {
+        this.onlineUsers.delete(socialKey);
+      }
     });
   }
 
   makePlayer(id, name, color, token) {
     const angle = rand(0, Math.PI * 2);
     return {
-      id, name: (name || 'Player').slice(0, 16), token: token || null,
+      id,
+      name: (name || 'Player').slice(0, 16),
+      token: token || null,
       path: [{ x: rand(-500, 500), y: rand(-500, 500) }],
-      angle, targetAngle: angle, length: START_LENGTH, boosting: false, alive: true,
+      angle,
+      targetAngle: angle,
+      length: START_LENGTH,
+      boosting: false,
+      alive: true,
       color: color || DEFAULT_COLORS[Math.floor(Math.random() * DEFAULT_COLORS.length)],
     };
   }
 
   segmentsFor(p) {
-    const segs = []; let travelled = 0;
+    const segs = [];
+    let travelled = 0;
     segs.push(p.path[0]);
     for (let i = 1; i < p.path.length && travelled < p.length; i++) {
       const a = p.path[i - 1], b = p.path[i];
@@ -130,7 +199,13 @@ export class Arena {
     for (let i = 0; i < count; i++) {
       const p = pathPoints[Math.floor(rand(0, pathPoints.length))];
       if (!p) continue;
-      this.food.push({ id: this.nextFoodId++, x: p.x + rand(-20, 20), y: p.y + rand(-20, 20), r: rand(5, 9), color: DEFAULT_COLORS[Math.floor(Math.random() * DEFAULT_COLORS.length)] });
+      this.food.push({
+        id: this.nextFoodId++,
+        x: p.x + rand(-20, 20),
+        y: p.y + rand(-20, 20),
+        r: rand(5, 9),
+        color: DEFAULT_COLORS[Math.floor(Math.random() * DEFAULT_COLORS.length)],
+      });
     }
   }
 
@@ -151,10 +226,13 @@ export class Arena {
             }
           }
         }
-      } catch (e) {}
+      } catch {}
     }
     for (const [ws, sess] of this.sessions) {
-      if (sess.id === p.id) { this.safeSend(ws, { type: 'dead', score: Math.floor(p.length) }); break; }
+      if (sess.id === p.id) {
+        this.safeSend(ws, { type: 'dead', score: Math.floor(p.length) });
+        break;
+      }
     }
   }
 
@@ -175,14 +253,20 @@ export class Arena {
       p.path.unshift({ x: nx, y: ny });
       const maxPathLen = Math.ceil((p.length / SEG_SPACING) * 1.4) + 20;
       if (p.path.length > maxPathLen) p.path.length = maxPathLen;
-      if (Math.abs(nx) > WORLD_SIZE / 2 || Math.abs(ny) > WORLD_SIZE / 2) { this.killPlayer(p); continue; }
+      if (Math.abs(nx) > WORLD_SIZE / 2 || Math.abs(ny) > WORLD_SIZE / 2) {
+        this.killPlayer(p);
+        continue;
+      }
     }
     for (const p of this.players.values()) {
       if (!p.alive) continue;
       const head = p.path[0];
       for (let i = this.food.length - 1; i >= 0; i--) {
         const f = this.food[i];
-        if (dist(head.x, head.y, f.x, f.y) < HEAD_RADIUS + f.r) { this.food.splice(i, 1); p.length += GROWTH_PER_FOOD; }
+        if (dist(head.x, head.y, f.x, f.y) < HEAD_RADIUS + f.r) {
+          this.food.splice(i, 1);
+          p.length += GROWTH_PER_FOOD;
+        }
       }
     }
     const alivePlayers = [...this.players.values()].filter((p) => p.alive);
@@ -194,7 +278,10 @@ export class Arena {
         if (other.id === p.id) continue;
         const segs = segCache.get(other.id);
         for (let i = 1; i < segs.length; i++) {
-          if (dist(head.x, head.y, segs[i].x, segs[i].y) < HEAD_RADIUS * 1.1) { this.killPlayer(p); break; }
+          if (dist(head.x, head.y, segs[i].x, segs[i].y) < HEAD_RADIUS * 1.1) {
+            this.killPlayer(p);
+            break;
+          }
         }
         if (!p.alive) break;
       }
@@ -203,16 +290,24 @@ export class Arena {
 
   broadcastState() {
     const alive = [...this.players.values()].filter((p) => p.alive);
-    const leaderboard = alive.slice().sort((a, b) => b.length - a.length).slice(0, 5).map((p) => ({ name: p.name, score: Math.floor(p.length) }));
+    const leaderboard = alive
+      .slice()
+      .sort((a, b) => b.length - a.length)
+      .slice(0, 5)
+      .map((p) => ({ name: p.name, score: Math.floor(p.length) }));
     const publicPlayers = alive.map((p) => ({
-      id: p.id, name: p.name, color: p.color,
+      id: p.id,
+      name: p.name,
+      color: p.color,
       segs: this.segmentsFor(p).map((s) => ({ x: Math.round(s.x), y: Math.round(s.y) })),
       length: Math.floor(p.length),
     }));
     this.broadcastAll({
-      type: 'state', players: publicPlayers,
+      type: 'state',
+      players: publicPlayers,
       food: this.food.map((f) => ({ x: Math.round(f.x), y: Math.round(f.y), r: f.r, c: f.color })),
-      leaderboard, worldSize: WORLD_SIZE,
+      leaderboard,
+      worldSize: WORLD_SIZE,
     });
   }
 
@@ -220,10 +315,12 @@ export class Arena {
     const data = JSON.stringify(obj);
     for (const [ws] of this.sessions) this.safeSendRaw(ws, data);
   }
+
   broadcastLobbyCount() {
     const data = JSON.stringify({ type: 'lobby-count', count: this.waiting.size });
     for (const ws of this.waiting.keys()) this.safeSendRaw(ws, data);
   }
+
   tryStartLobby() {
     if (this.waiting.size >= LOBBY_THRESHOLD) {
       for (const [ws, info] of this.waiting) {
@@ -233,13 +330,23 @@ export class Arena {
       this.waiting.clear();
     }
   }
-  safeSend(ws, obj) { this.safeSendRaw(ws, JSON.stringify(obj)); }
-  safeSendRaw(ws, data) { try { if (ws.readyState === 1) ws.send(data); } catch {} }
+
+  safeSend(ws, obj) {
+    this.safeSendRaw(ws, JSON.stringify(obj));
+  }
+
+  safeSendRaw(ws, data) {
+    try {
+      if (ws.readyState === 1) ws.send(data);
+    } catch {}
+  }
+
   scheduleAlarm() {
     if (this.alarmScheduled) return;
     this.alarmScheduled = true;
     this.state.storage.setAlarm(Date.now() + TICK_MS);
   }
+
   async alarm() {
     this.alarmScheduled = false;
     const now = Date.now();
