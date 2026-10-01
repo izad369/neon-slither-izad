@@ -3,6 +3,22 @@ import { Arena } from './arena.js';
 export { Arena };
 
 const encoder = new TextEncoder();
+
+// --- Central Game Account Manager (one account for all games) ---
+const CAM_BASE = 'https://game-account-manager.rezaei-reza1092.workers.dev';
+async function camApi(path, body) {
+  try {
+    const r = await fetch(CAM_BASE + '/api' + path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body || {}),
+    });
+    const data = await r.json().catch(() => ({}));
+    return { ok: r.ok, data };
+  } catch {
+    return { ok: false, data: {} };
+  }
+}
 const GOOD_INDEX_URL =
   'https://raw.githubusercontent.com/izad369/neon-slither-izad/17716e5bf55a6f5f02d4ffc8f4dca5835673777f/index.html';
 
@@ -40,7 +56,8 @@ function patchChatClient(html) {
     "function sendChatMessage(){\n    const input = document.getElementById('chatInput');\n    const text = input.value.trim();\n    if(!text || !currentChatFriend || !socialSocket || socialSocket.readyState !== 1) return;\n    socialSocket.send(JSON.stringify({ type:'chat-send', token: store.token, to: currentChatFriend, text }));\n    appendChatBubble(text, true);\n    input.value = '';\n  }";
 
   const newFn =
-    "async function sendChatMessage(){\n    const input = document.getElementById('chatInput');\n    const text = input.value.trim();\n    if(!text || !currentChatFriend || !store.token) return;\n    input.value = '';\n    appendChatBubble(text, true);\n    try {\n      await api('/api/chat/send', { token: store.token, to: currentChatFriend, text: text });\n    } catch(e) { console.warn('chat send failed', e); }\n    try {\n      if(socialSocket && socialSocket.readyState === 1){\n        socialSocket.send(JSON.stringify({ type:'chat-send', token: store.token, to: currentChatFriend, text: text }));\n      }\n    } catch(e) {}\n  }";
+    "async function sendChatMessage(){\n    const input = document.getElementById('cha
+tInput');\n    const text = input.value.trim();\n    if(!text || !currentChatFriend || !store.token) return;\n    input.value = '';\n    appendChatBubble(text, true);\n    try {\n      await api('/api/chat/send', { token: store.token, to: currentChatFriend, text: text });\n    } catch(e) { console.warn('chat send failed', e); }\n    try {\n      if(socialSocket && socialSocket.readyState === 1){\n        socialSocket.send(JSON.stringify({ type:'chat-send', token: store.token, to: currentChatFriend, text: text }));\n      }\n    } catch(e) {}\n  }";
 
   if (html.includes(oldFn)) {
     html = html.replace(oldFn, newFn);
@@ -74,7 +91,8 @@ async function serveGameHtml() {
   let html = await res.text();
   html = patchChatClient(html);
   return new Response(html, {
-    status: 200,
+    status: 
+200,
     headers: {
       'Content-Type': 'text/html; charset=utf-8',
       'Cache-Control': 'no-store',
@@ -100,24 +118,38 @@ async function handleApi(request, env, pathname) {
       return json({ error: 'Username needs 3+ chars, password 4+ chars.' }, 400);
     const key = username.toLowerCase();
     if (await env.USERS.get('user:' + key)) return json({ error: 'That username is taken.' }, 409);
+    // Also create the shared Game Account (best effort — never blocks the game)
+    const cam = await camApi('/signup', { username, password });
     const salt = makeSalt();
     const hash = await hashPassword(password, salt);
     await env.USERS.put('user:' + key, JSON.stringify({ username, salt, hash, bestScore: 0, skin: 'classic', friends: [] }));
     const token = makeToken();
     await env.USERS.put('token:' + token, key, { expirationTtl: 60 * 60 * 24 * 30 });
-    return json({ token, username, bestScore: 0, skin: 'classic' });
+    return json({ token, username, bestScore: 0, skin: 'classic', gameAccount: cam.ok });
   }
 
   if (pathname === '/api/login' && request.method === 'POST') {
     const { username, password } = await readJson(request);
     const key = (username || '').toLowerCase();
     const raw = await env.USERS.get('user:' + key);
-    if (!raw) return json({ error: 'Wrong username or password.' }, 401);
-    const u = JSON.parse(raw);
-    if ((await hashPassword(password || '', u.salt)) !== u.hash) return json({ error: 'Wrong username or password.' }, 401);
-    const token = makeToken();
-    await env.USERS.put('token:' + token, key, { expirationTtl: 60 * 60 * 24 * 30 });
-    return json({ token, username: u.username, bestScore: u.bestScore || 0, skin: u.skin || 'classic' });
+    if (raw) {
+      const u = JSON.parse(raw);
+      if ((await hashPassword(password || '', u.salt)) !== u.hash) return json({ error: 'Wrong username or password.' }, 401);
+      const token = makeToken();
+      await env.USERS.put('token:' + token, key, { expirationTtl: 60 * 60 * 24 * 30 });
+      return json({ token, username: u.username, bestScore: u.bestScore || 0, skin: u.skin || 'classic' });
+    }
+    // No local account: try the shared Game Account (works in every game)
+    const cam = await camApi('/login', { username: username || '', password: password || '' });
+    if (cam.ok && cam.data.token) {
+      const salt = makeSalt();
+      const hash = await hashPassword(password || '', salt);
+      await env.USERS.put('user:' + key, JSON.stringify({ username: cam.data.username, salt, hash, bestScore: 0, skin: 'classic', friends: [] }));
+      const token = makeToken();
+      await env.USERS.put('token:' + token, key, { expirationTtl: 60 * 60 * 24 * 30 });
+      return json({ token, username: cam.data.username, bestScore: 0, skin: 'classic', gameAccount: true });
+    }
+    return json({ error: 'Wrong username or password.' }, 401);
   }
 
   if (pathname === '/api/profile' && request.method === 'POST') {
@@ -166,7 +198,8 @@ async function handleApi(request, env, pathname) {
         online: false,
         isFriend: !!(me && Array.isArray(me.friends) && me.friends.includes(k)),
       });
-      if (results.length >= 15) break;
+      
+if (results.length >= 15) break;
     }
     return json({ results });
   }
@@ -210,7 +243,8 @@ async function handleApi(request, env, pathname) {
     return json({ ok: true, username: targetUser.username });
   }
 
-  if (pathname === '/api/chat/send' && request.method === 'POST') {
+  if (pathname === '/api
+/chat/send' && request.method === 'POST') {
     const { token, to, text } = await readJson(request);
     const key = await env.USERS.get('token:' + token);
     if (!key) return json({ error: 'Not logged in.' }, 401);
@@ -254,6 +288,7 @@ async function handleApi(request, env, pathname) {
 
   return json({ error: 'Not found' }, 404);
 }
+
 
 export default {
   async fetch(request, env) {
