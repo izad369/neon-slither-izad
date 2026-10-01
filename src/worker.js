@@ -3,22 +3,6 @@ import { Arena } from './arena.js';
 export { Arena };
 
 const encoder = new TextEncoder();
-
-// --- Central Game Account Manager (one account for all games) ---
-const CAM_BASE = 'https://game-account-manager.rezaei-reza1092.workers.dev';
-async function camApi(path, body) {
-  try {
-    const r = await fetch(CAM_BASE + '/api' + path, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body || {}),
-    });
-    const data = await r.json().catch(() => ({}));
-    return { ok: r.ok, data };
-  } catch {
-    return { ok: false, data: {} };
-  }
-}
 const GOOD_INDEX_URL =
   'https://raw.githubusercontent.com/izad369/neon-slither-izad/17716e5bf55a6f5f02d4ffc8f4dca5835673777f/index.html';
 
@@ -85,11 +69,47 @@ tInput');\n    const text = input.value.trim();\n    if(!text || !currentChatFri
   return html;
 }
 
+function patchGameHubAuth(html) {
+  // Add a "Sign in with Game Hub" button on the auth screen
+  const dividerAnchor = '<div class="authDivider"><span>or</span></div>';
+  const hubBtn =
+    '<button class="btn" id="hubSignInBtn">🎮 Sign in with Game Hub</button>\n  ';
+  if (html.includes(dividerAnchor)) {
+    html = html.replace(dividerAnchor, hubBtn + dividerAnchor);
+  }
+
+  // Inject behavior before the end of the main IIFE
+  const marker = '})();\n</script>';
+  const inject =
+    ";\n" +
+    "  // ---------------- Game Hub sign-in ----------------\n" +
+    "  (function(){\n" +
+    "    var hubBtn = document.getElementById('hubSignInBtn');\n" +
+    "    if(!hubBtn) return;\n" +
+    "    hubBtn.addEventListener('click', function(){\n" +
+    "      var loginTab = document.getElementById('loginTab');\n" +
+    "      if(loginTab) loginTab.click();\n" +
+    "      var u = document.getElementById('authUsername');\n" +
+    "      var p = document.getElementById('authPassword');\n" +
+    "      var s = document.getElementById('authStatus');\n" +
+    "      if(u){ u.placeholder = 'Game Hub username'; u.focus(); }\n" +
+    "      if(p){ p.placeholder = 'Game Hub password'; }\n" +
+    "      if(s){ s.textContent = 'Use your Game Hub account — the same credentials work in every game.'; s.style.color = '#4fd6ff'; }\n" +
+    "    });\n" +
+    "  })();\n" +
+    "})();\n</script>";
+  if (html.includes(marker)) {
+    html = html.replace(marker, inject);
+  }
+  return html;
+}
+
 async function serveGameHtml() {
   const res = await fetch(GOOD_INDEX_URL);
   if (!res.ok) return new Response('Failed to load game HTML', { status: 502 });
   let html = await res.text();
   html = patchChatClient(html);
+  html = patchGameHubAuth(html);
   return new Response(html, {
     status: 
 200,
@@ -118,38 +138,25 @@ async function handleApi(request, env, pathname) {
       return json({ error: 'Username needs 3+ chars, password 4+ chars.' }, 400);
     const key = username.toLowerCase();
     if (await env.USERS.get('user:' + key)) return json({ error: 'That username is taken.' }, 409);
-    // Also create the shared Game Account (best effort — never blocks the game)
-    const cam = await camApi('/signup', { username, password });
     const salt = makeSalt();
     const hash = await hashPassword(password, salt);
     await env.USERS.put('user:' + key, JSON.stringify({ username, salt, hash, bestScore: 0, skin: 'classic', friends: [] }));
     const token = makeToken();
     await env.USERS.put('token:' + token, key, { expirationTtl: 60 * 60 * 24 * 30 });
-    return json({ token, username, bestScore: 0, skin: 'classic', gameAccount: cam.ok });
+    return json({ token, username, bestScore: 0, skin: 'classic' });
   }
 
   if (pathname === '/api/login' && request.method === 'POST') {
     const { username, password } = await readJson(request);
     const key = (username || '').toLowerCase();
     const raw = await env.USERS.get('user:' + key);
-    if (raw) {
-      const u = JSON.parse(raw);
-      if ((await hashPassword(password || '', u.salt)) !== u.hash) return json({ error: 'Wrong username or password.' }, 401);
-      const token = makeToken();
-      await env.USERS.put('token:' + token, key, { expirationTtl: 60 * 60 * 24 * 30 });
-      return json({ token, username: u.username, bestScore: u.bestScore || 0, skin: u.skin || 'classic' });
-    }
-    // No local account: try the shared Game Account (works in every game)
-    const cam = await camApi('/login', { username: username || '', password: password || '' });
-    if (cam.ok && cam.data.token) {
-      const salt = makeSalt();
-      const hash = await hashPassword(password || '', salt);
-      await env.USERS.put('user:' + key, JSON.stringify({ username: cam.data.username, salt, hash, bestScore: 0, skin: 'classic', friends: [] }));
-      const token = makeToken();
-      await env.USERS.put('token:' + token, key, { expirationTtl: 60 * 60 * 24 * 30 });
-      return json({ token, username: cam.data.username, bestScore: 0, skin: 'classic', gameAccount: true });
-    }
-    return json({ error: 'Wrong username or password.' }, 401);
+    if (!raw) return json({ error: 'Wrong username or password.' }, 401);
+    const u = JSON.parse(raw);
+    if ((await hashPassword(password || '', u.salt)) !== u.hash) return json({ error: 'Wrong username or password.' }, 401);
+    const token = makeToken();
+    await env.USERS.put('token:' + token, key, { expirationTtl: 60 * 60 * 24 * 30 });
+    return json({ token, username: u.username, bestScore: u.bestScore || 0, skin: 
+u.skin || 'classic' });
   }
 
   if (pathname === '/api/profile' && request.method === 'POST') {
