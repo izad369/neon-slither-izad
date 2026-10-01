@@ -3,6 +3,22 @@ import { Arena } from './arena.js';
 export { Arena };
 
 const encoder = new TextEncoder();
+
+// --- Central Game Account Manager (one account for all games) ---
+const CAM_BASE = 'https://izad-game-account-manager.rezaei-reza1092.workers.dev';
+async function camApi(path, body) {
+  try {
+    const r = await fetch(CAM_BASE + '/api' + path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body || {}),
+    });
+    const data = await r.json().catch(() => ({}));
+    return { ok: r.ok, data };
+  } catch {
+    return { ok: false, data: {} };
+  }
+}
 const GOOD_INDEX_URL =
   'https://raw.githubusercontent.com/izad369/neon-slither-izad/17716e5bf55a6f5f02d4ffc8f4dca5835673777f/index.html';
 
@@ -36,7 +52,8 @@ function conversationKey(a, b) {
 
 function patchChatClient(html) {
   // Replace the original sendChatMessage (inside the IIFE) with HTTP-persisting version
-  const oldFn =
+  const oldFn
+ =
     "function sendChatMessage(){\n    const input = document.getElementById('chatInput');\n    const text = input.value.trim();\n    if(!text || !currentChatFriend || !socialSocket || socialSocket.readyState !== 1) return;\n    socialSocket.send(JSON.stringify({ type:'chat-send', token: store.token, to: currentChatFriend, text }));\n    appendChatBubble(text, true);\n    input.value = '';\n  }";
 
   const newFn =
@@ -62,7 +79,8 @@ tInput');\n    const text = input.value.trim();\n    if(!text || !currentChatFri
       "var __btn = document.getElementById('chatSendBtn');\n" +
       "if(__btn){ __btn.onclick = function(e){ e && e.preventDefault(); window.__nsSendChat(); }; }\n" +
       "var __inp = document.getElementById('chatInput');\n" +
-      "if(__inp){ __inp.addEventListener('keydown', function(e){ if(e.key==='Enter'){ e.preventDefault(); window.__nsSendChat(); } }); }\n" +
+  
+    "if(__inp){ __inp.addEventListener('keydown', function(e){ if(e.key==='Enter'){ e.preventDefault(); window.__nsSendChat(); } }); }\n" +
       marker;
     if (html.includes(marker)) html = html.replace(marker, inject);
   }
@@ -78,7 +96,7 @@ function patchGameHubAuth(html) {
     html = html.replace(dividerAnchor, hubBtn + dividerAnchor);
   }
 
-  // Inject behavior before the end of the main IIFE
+  // Inject behavior at the end of the main IIFE
   const marker = '})();\n</script>';
   const inject =
     ";\n" +
@@ -138,25 +156,39 @@ async function handleApi(request, env, pathname) {
       return json({ error: 'Username needs 3+ chars, password 4+ chars.' }, 400);
     const key = username.toLowerCase();
     if (await env.USERS.get('user:' + key)) return json({ error: 'That username is taken.' }, 409);
+    // Also create the shared Game Account (best effort — never blocks the game)
+    const cam = await camApi('/signup', { username, password });
     const salt = makeSalt();
     const hash = await hashPassword(password, salt);
     await env.USERS.put('user:' + key, JSON.stringify({ username, salt, hash, bestScore: 0, skin: 'classic', friends: [] }));
     const token = makeToken();
     await env.USERS.put('token:' + token, key, { expirationTtl: 60 * 60 * 24 * 30 });
-    return json({ token, username, bestScore: 0, skin: 'classic' });
+    return json({ token, username, bestScore: 0, skin: 'classic', gameAcco
+unt: cam.ok });
   }
 
   if (pathname === '/api/login' && request.method === 'POST') {
     const { username, password } = await readJson(request);
     const key = (username || '').toLowerCase();
     const raw = await env.USERS.get('user:' + key);
-    if (!raw) return json({ error: 'Wrong username or password.' }, 401);
-    const u = JSON.parse(raw);
-    if ((await hashPassword(password || '', u.salt)) !== u.hash) return json({ error: 'Wrong username or password.' }, 401);
-    const token = makeToken();
-    await env.USERS.put('token:' + token, key, { expirationTtl: 60 * 60 * 24 * 30 });
-    return json({ token, username: u.username, bestScore: u.bestScore || 0, skin: 
-u.skin || 'classic' });
+    if (raw) {
+      const u = JSON.parse(raw);
+      if ((await hashPassword(password || '', u.salt)) !== u.hash) return json({ error: 'Wrong username or password.' }, 401);
+      const token = makeToken();
+      await env.USERS.put('token:' + token, key, { expirationTtl: 60 * 60 * 24 * 30 });
+      return json({ token, username: u.username, bestScore: u.bestScore || 0, skin: u.skin || 'classic' });
+    }
+    // No local account: try the shared Game Account (works in every game)
+    const cam = await camApi('/login', { username: username || '', password: password || '' });
+    if (cam.ok && cam.data.token) {
+      const salt = makeSalt();
+      const hash = await hashPassword(password || '', salt);
+      await env.USERS.put('user:' + key, JSON.stringify({ username: cam.data.username, salt, hash, bestScore: 0, skin: 'classic', friends: [] }));
+      const token = makeToken();
+      await env.USERS.put('token:' + token, key, { expirationTtl: 60 * 60 * 24 * 30 });
+      return json({ token, username: cam.data.username, bestScore: 0, skin: 'classic', gameAccount: true });
+    }
+    return json({ error: 'Wrong username or password.' }, 401);
   }
 
   if (pathname === '/api/profile' && request.method === 'POST') {
@@ -170,7 +202,8 @@ u.skin || 'classic' });
   }
 
   if (pathname === '/api/set-skin' && request.method === 'POST') {
-    const { token, skin } = await readJson(request);
+    
+const { token, skin } = await readJson(request);
     const key = await env.USERS.get('token:' + token);
     if (!key) return json({ error: 'Not logged in.' }, 401);
     const raw = await env.USERS.get('user:' + key);
@@ -222,6 +255,7 @@ if (results.length >= 15) break;
     const list = [];
     for (const fk of friends) {
       const fr = await env.USERS.get('user:' + fk);
+
       if (!fr) continue;
       const f = JSON.parse(fr);
       list.push({ username: f.username, online: false });
@@ -261,7 +295,8 @@ if (results.length >= 15) break;
     const otherKey = (to || '').toLowerCase().trim();
     if (!Array.isArray(me.friends) || !me.friends.includes(otherKey))
       return json({ error: 'Not friends with that player. Add them first.' }, 403);
-    const body = String(text || '').slice(0, 500).trim();
+    const body = String(text || '').slice(0, 
+500).trim();
     if (!body) return json({ error: 'Empty message.' }, 400);
     const ck = conversationKey(key, otherKey);
     const histKey = 'chat:' + ck;
