@@ -52,13 +52,11 @@ function conversationKey(a, b) {
 
 function patchChatClient(html) {
   // Replace the original sendChatMessage (inside the IIFE) with HTTP-persisting version
-  const oldFn
- =
+  const oldFn =
     "function sendChatMessage(){\n    const input = document.getElementById('chatInput');\n    const text = input.value.trim();\n    if(!text || !currentChatFriend || !socialSocket || socialSocket.readyState !== 1) return;\n    socialSocket.send(JSON.stringify({ type:'chat-send', token: store.token, to: currentChatFriend, text }));\n    appendChatBubble(text, true);\n    input.value = '';\n  }";
 
   const newFn =
-    "async function sendChatMessage(){\n    const input = document.getElementById('cha
-tInput');\n    const text = input.value.trim();\n    if(!text || !currentChatFriend || !store.token) return;\n    input.value = '';\n    appendChatBubble(text, true);\n    try {\n      await api('/api/chat/send', { token: store.token, to: currentChatFriend, text: text });\n    } catch(e) { console.warn('chat send failed', e); }\n    try {\n      if(socialSocket && socialSocket.readyState === 1){\n        socialSocket.send(JSON.stringify({ type:'chat-send', token: store.token, to: currentChatFriend, text: text }));\n      }\n    } catch(e) {}\n  }";
+    "async function sendChatMessage(){\n    const input = document.getElementById('chatInput');\n    const text = input.value.trim();\n    if(!text || !currentChatFriend || !store.token) return;\n    input.value = '';\n    appendChatBubble(text, true);\n    try {\n      await api('/api/chat/send', { token: store.token, to: currentChatFriend, text: text });\n    } catch(e) { console.warn('chat send failed', e); }\n    try {\n      if(socialSocket && socialSocket.readyState === 1){\n        socialSocket.send(JSON.stringify({ type:'chat-send', token: store.token, to: currentChatFriend, text: text }));\n      }\n    } catch(e) {}\n  }";
 
   if (html.includes(oldFn)) {
     html = html.replace(oldFn, newFn);
@@ -163,8 +161,7 @@ async function handleApi(request, env, pathname) {
     await env.USERS.put('user:' + key, JSON.stringify({ username, salt, hash, bestScore: 0, skin: 'classic', friends: [] }));
     const token = makeToken();
     await env.USERS.put('token:' + token, key, { expirationTtl: 60 * 60 * 24 * 30 });
-    return json({ token, username, bestScore: 0, skin: 'classic', gameAcco
-unt: cam.ok });
+    return json({ token, username, bestScore: 0, skin: 'classic', gameAccount: cam.ok });
   }
 
   if (pathname === '/api/login' && request.method === 'POST') {
@@ -284,8 +281,7 @@ if (results.length >= 15) break;
     return json({ ok: true, username: targetUser.username });
   }
 
-  if (pathname === '/api
-/chat/send' && request.method === 'POST') {
+  if (pathname === '/api/chat/send' && request.method === 'POST') {
     const { token, to, text } = await readJson(request);
     const key = await env.USERS.get('token:' + token);
     if (!key) return json({ error: 'Not logged in.' }, 401);
