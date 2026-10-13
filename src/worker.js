@@ -340,6 +340,17 @@ export default {
       return env.ARENA.get(id).fetch(request);
     }
     if (url.pathname.startsWith('/api/')) return handleApi(request, env, url.pathname);
+    // Discord Domain Connection verification (profile website link).
+    // Discord fetches this exact URL and must see the challenge token as plain text.
+    if (url.pathname === '/.well-known/discord') {
+      return new Response('dh=afda6134a3a825b16e83b86e988b0f0619a0eb62', {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/plain;charset=UTF-8',
+          'Cache-Control': 'public, max-age=300',
+        },
+      });
+    }
     if (url.pathname === '/' || url.pathname === '/index.html') {
       return serveGameHtml();
     }
