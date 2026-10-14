@@ -120,10 +120,22 @@ function patchGameHubAuth(html) {
   return html;
 }
 
-async function serveGameHtml() {
-  const res = await fetch(GOOD_INDEX_URL);
-  if (!res.ok) return new Response('Failed to load game HTML', { status: 502 });
-  let html = await res.text();
+async function serveGameHtml(request, env) {
+  let html = null;
+  // Prefer the repo's own bundled index.html (kept in sync with the repo),
+  // fall back to the pinned raw.githubusercontent URL if the asset is gone.
+  try {
+    if (env && env.ASSETS) {
+      const origin = new URL(request.url).origin;
+      const ares = await env.ASSETS.fetch(origin + '/index.html');
+      if (ares && ares.ok) html = await ares.text();
+    }
+  } catch (e) { html = null; }
+  if (!html) {
+    const res = await fetch(GOOD_INDEX_URL);
+    if (!res.ok) return new Response('Failed to load game HTML', { status: 502 });
+    html = await res.text();
+  }
   html = patchChatClient(html);
   html = patchGameHubAuth(html);
   return new Response(html, {
@@ -348,7 +360,7 @@ export default {
       });
     }
     if (url.pathname === '/' || url.pathname === '/index.html') {
-      return serveGameHtml();
+      return serveGameHtml(request, env);
     }
     if (env.ASSETS) return env.ASSETS.fetch(request);
     return new Response('Neon Slither Worker is running.', { status: 200 });
