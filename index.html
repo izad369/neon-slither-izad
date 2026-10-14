@@ -430,6 +430,7 @@
 
 <script>
 (function(){
+  const REMOTE_BASE = 'https://neon-slither-izad.rezaei-reza1092.workers.dev';
   // ================================================================
   //  STORAGE / SESSION
   // ================================================================
@@ -465,7 +466,7 @@
   let session = { loggedIn: false, username:null, bestScore:0, skin: store.skin };
 
   async function api(pathName, body){
-    const res = await fetch(pathName, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body||{}) });
+    const res = await fetch(REMOTE_BASE + pathName, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body||{}) });
     const data = await res.json().catch(()=>({}));
     if(!res.ok) throw new Error(data.error || 'Request failed');
     return data;
@@ -896,7 +897,7 @@
   // ================================================================
   let socket = null;
 
-  function wsUrl(){ return (location.protocol==='https:'?'wss':'ws') + '://' + location.host + '/ws'; }
+  function wsUrl(){ return REMOTE_BASE.replace('https://','wss://') + '/ws'; }
 
   function goToLobby(){
     showScreen('lobbyScreen');
